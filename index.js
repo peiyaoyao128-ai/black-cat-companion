@@ -6,7 +6,7 @@ export { MODULE_NAME };
 const MODULE_NAME = 'black_cat_companion';
 const DEBUG_PREFIX = '<BlackCatCompanion> ';
 const UPDATE_INTERVAL = 2000;
-const EXTENSION_VERSION = '0.6.22';
+const EXTENSION_VERSION = '0.6.23';
 
 const windowHtmlPath = new URL('./window.html', import.meta.url).href;
 
@@ -943,7 +943,7 @@ function handleAction(action) {
             settings.mood = clamp(settings.mood + 12);
             settings.affection = clamp(settings.affection + 6);
             settings.energy = clamp(settings.energy - 2);
-            setTransientPose('happy', 10600);
+            setTransientPose('happy', 10733);
             renderBubble(randomItem([
                 '它眯起眼，喉咙里咕噜咕噜的。',
                 '它把脑袋往你手心蹭了蹭，看起来很受用。',
@@ -983,7 +983,7 @@ function handleAction(action) {
             settings.mood = clamp(settings.mood + 2);
             renderBubble('小黑猫蜷成一团睡着了。');
         } else {
-            setTransientPose('happy', 1800);
+            setTransientPose('happy', 10733);
             renderBubble('小黑猫醒了，懒洋洋地伸了个小懒腰。');
         }
     }
