@@ -573,3 +573,36 @@
         opacity: .78;
     }
 }
+
+
+/* v6.18 动态素材版：使用上传视频转成的透明 animated WebP。 */
+.bcc-cat-image {
+    animation: none !important;
+    object-fit: contain;
+    background: transparent !important;
+}
+
+.bcc-cat-button.bcc-pose-sit .bcc-cat-image,
+.bcc-cat-button.bcc-pose-loaf .bcc-cat-image,
+.bcc-cat-button.bcc-pose-sleep .bcc-cat-image,
+.bcc-cat-button.bcc-pose-alert .bcc-cat-image,
+.bcc-cat-button.bcc-pose-happy .bcc-cat-image,
+.bcc-cat-button.bcc-pose-talk .bcc-cat-image,
+.bcc-cat-button.bcc-pose-play .bcc-cat-image {
+    animation: none !important;
+}
+
+
+/* v6.22: 防止互动菜单点击冒泡到酒馆聊天区 */
+.bcc-pet-menu,
+.bcc-pet-menu * {
+    -webkit-tap-highlight-color: transparent;
+}
+
+.bcc-pet-menu button,
+.bcc-pet-menu input,
+.bcc-pet-menu .bcc-btn,
+.bcc-pet-menu .bcc-close,
+.bcc-pet-menu .bcc-menu-resize-handle {
+    pointer-events: auto;
+}

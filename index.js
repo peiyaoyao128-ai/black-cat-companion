@@ -6,7 +6,7 @@ export { MODULE_NAME };
 const MODULE_NAME = 'black_cat_companion';
 const DEBUG_PREFIX = '<BlackCatCompanion> ';
 const UPDATE_INTERVAL = 2000;
-const EXTENSION_VERSION = '0.6.7';
+const EXTENSION_VERSION = '0.6.22';
 
 const windowHtmlPath = new URL('./window.html', import.meta.url).href;
 
@@ -43,6 +43,7 @@ let catButton = null;
 let pawButton = null;
 let catImage = null;
 let catBadge = null;
+let catAssetNonce = 0;
 let petMenu = null;
 let petMenuContent = null;
 let bubble = null;
@@ -178,21 +179,29 @@ function getResolvedPose(settings = getSettings()) {
     return getBasePose(settings);
 }
 
+function restartCatAnimation() {
+    catAssetNonce += 1;
+    if (catImage) {
+        catImage.removeAttribute('src');
+    }
+}
+
 function setTransientPose(pose, duration = 2200) {
     const settings = getSettings();
     settings.effectPose = pose;
     settings.effectUntil = Date.now() + duration;
+    restartCatAnimation();
 }
 
 function getCatAssetPath(settings = getSettings()) {
     const pose = getResolvedPose(settings);
-    if (pose === 'sleep') return assetPath('cat-sleep.png');
-    if (pose === 'alert') return assetPath('cat-alert.png');
-    if (pose === 'happy') return assetPath('cat-happy.png');
-    if (pose === 'talk') return assetPath('cat-talk.png');
-    if (pose === 'play') return assetPath('cat-play.png');
-    if (pose === 'loaf') return assetPath('cat-loaf.png');
-    return assetPath('cat-sit.png');
+    if (pose === 'sleep') return assetPath('cat-sleep.webp');
+    if (pose === 'alert') return assetPath('cat-alert.webp');
+    if (pose === 'happy') return assetPath('cat-happy.webp');
+    if (pose === 'talk') return assetPath('cat-talk.webp');
+    if (pose === 'play') return assetPath('cat-play.webp');
+    if (pose === 'loaf') return assetPath('cat-loaf.webp');
+    return assetPath('cat-sit.webp');
 }
 
 function getPoseText(settings = getSettings()) {
@@ -338,6 +347,22 @@ function insertIntoInput(text) {
     el.focus();
 }
 
+
+function isolatePetMenuEvent(event) {
+    // 不让互动菜单里的点击冒泡到酒馆聊天区，
+    // 避免手机端点按钮时把底部聊天输入界面唤出来。
+    event.stopPropagation();
+}
+
+function bindPetMenuEventIsolation() {
+    if (!petMenu || petMenu.dataset.bccIsolated === '1') return;
+    petMenu.dataset.bccIsolated = '1';
+
+    ['click', 'dblclick', 'auxclick', 'mousedown', 'mouseup', 'pointerdown', 'pointerup', 'touchstart', 'touchend', 'contextmenu'].forEach((type) => {
+        petMenu.addEventListener(type, isolatePetMenuEvent, false);
+    });
+}
+
 function createDesktopPet() {
     if (desktopRoot) return;
 
@@ -366,6 +391,8 @@ function createDesktopPet() {
     petMenu = document.getElementById('bcc-pet-menu');
     petMenuContent = document.getElementById('bcc-pet-menu-content');
     bubble = document.getElementById('bcc-pet-bubble');
+
+    bindPetMenuEventIsolation();
 
     catImage?.setAttribute('draggable', 'false');
     catButton?.addEventListener('dragstart', (event) => event.preventDefault());
@@ -685,7 +712,11 @@ function updateDesktopPet() {
     catButton.classList.toggle('bcc-hungry', settings.hunger < 30);
 
     catButton.title = `${settings.name}｜${getMoodText(settings)}`;
-    catImage.src = getCatAssetPath(settings);
+    const nextAsset = getCatAssetPath(settings);
+    const displayAsset = `${nextAsset}${nextAsset.includes('?') ? '&' : '?'}bccv=${catAssetNonce}`;
+    if (catImage.getAttribute('src') !== displayAsset) {
+        catImage.src = displayAsset;
+    }
     catImage.alt = settings.name;
 
     catBadge.textContent = '';
@@ -741,19 +772,31 @@ function updatePetMenu() {
         <div class="bcc-menu-resize-handle" title="拖动缩放菜单">↘</div>
     `;
 
-    petMenuContent.querySelector('[data-bcc-close]')?.addEventListener('click', () => {
+    petMenuContent.querySelector('[data-bcc-close]')?.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
         petMenu?.classList.remove('bcc-show');
     });
 
     petMenuContent.querySelectorAll('[data-bcc-action]').forEach((btn) => {
-        btn.addEventListener('click', () => handleAction(btn.getAttribute('data-bcc-action')));
+        btn.setAttribute('type', 'button');
+        btn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            handleAction(btn.getAttribute('data-bcc-action'));
+        });
     });
 
     const scaleSlider = petMenuContent.querySelector('#bcc-scale-slider');
     const scaleValue = petMenuContent.querySelector('#bcc-scale-value');
     let scaleSaveTimer = null;
 
-    scaleSlider?.addEventListener('input', () => {
+    scaleSlider?.addEventListener('pointerdown', (event) => event.stopPropagation());
+    scaleSlider?.addEventListener('touchstart', (event) => event.stopPropagation(), { passive: true });
+    scaleSlider?.addEventListener('click', (event) => event.stopPropagation());
+
+    scaleSlider?.addEventListener('input', (event) => {
+        event.stopPropagation();
         const settings = getSettings();
         settings.scale = clamp(Number(scaleSlider.value) / 100, 0.7, 1.6);
         if (scaleValue) scaleValue.textContent = `${Math.round(settings.scale * 100)}%`;
@@ -767,7 +810,8 @@ function updatePetMenu() {
         scaleSaveTimer = setTimeout(() => persist(), 220);
     });
 
-    scaleSlider?.addEventListener('change', () => {
+    scaleSlider?.addEventListener('change', (event) => {
+        event.stopPropagation();
         persist();
         applyDesktopPosition();
         applyPawPosition();
@@ -882,7 +926,7 @@ function handleAction(action) {
         settings.mood = clamp(settings.mood + 8);
         settings.energy = clamp(settings.energy + 3);
         settings.affection = clamp(settings.affection + 3);
-        setTransientPose('talk', 2000);
+        setTransientPose('talk', 7600);
         renderBubble(randomItem([
             '喵呜。它叼走小鱼干，嚼完还冲你眨了下眼。',
             '它吃得很认真，耳朵都满足地抖了一下。',
@@ -899,7 +943,7 @@ function handleAction(action) {
             settings.mood = clamp(settings.mood + 12);
             settings.affection = clamp(settings.affection + 6);
             settings.energy = clamp(settings.energy - 2);
-            setTransientPose('happy', 2400);
+            setTransientPose('happy', 10600);
             renderBubble(randomItem([
                 '它眯起眼，喉咙里咕噜咕噜的。',
                 '它把脑袋往你手心蹭了蹭，看起来很受用。',
@@ -916,11 +960,11 @@ function handleAction(action) {
             setTransientPose('loaf', 1800);
             renderBubble('它只象征性拍了一下你的手，然后继续趴着。');
         } else {
-            settings.pose = 'alert';
+            settings.pose = 'sit';
             settings.energy = clamp(settings.energy - 16);
             settings.mood = clamp(settings.mood + 14);
             settings.affection = clamp(settings.affection + 5);
-            setTransientPose('play', 2400);
+            setTransientPose('play', 10600);
             renderBubble(randomItem([
                 '它一下来了精神，爪子都举起来了。',
                 '小黑猫扑腾了一下，像一团突然起飞的小黑影。',
@@ -977,6 +1021,10 @@ function handleAction(action) {
     if (action === 'resetState') {
         resetState();
         return;
+    }
+
+    if (petMenu?.contains(document.activeElement)) {
+        document.activeElement?.blur?.();
     }
 
     refreshAllUi();
@@ -1446,7 +1494,7 @@ async function appendSettingsWindow() {
                                 <div id="black_cat_toggle" class="menu_button">隐藏小黑猫</div>
                                 <div id="black_cat_reset_position" class="menu_button">复位到中央</div>
                             </div>
-                            <small class="bcc-lite-hint">这里只是控制入口。扩展菜单里的隐藏会完全隐藏小黑猫；如果想留下猫爪，请在小黑猫互动菜单里点隐藏。</small>
+                            <small class="bcc-lite-hint">这里只是控制入口。这版已把摸头和吃东西视频替换到对应互动动作；扩展菜单隐藏是完全隐藏，互动菜单隐藏会留下猫爪。</small>
                         </div>
                     </div>
                 </div>
