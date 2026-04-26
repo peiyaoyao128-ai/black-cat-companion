@@ -14,6 +14,7 @@ const windowHtmlPath = new URL('./window.html', import.meta.url).href;
 const defaultSettings = {
     version: EXTENSION_VERSION,
     visible: true,
+    showPawWhenHidden: false,
     name: '小黑',
     hunger: 72,
     mood: 70,
@@ -34,7 +35,7 @@ const defaultSettings = {
     effectUntil: 0,
 };
 
-const persistedKeys = ['version', 'visible', 'name', 'x', 'y', 'scale', 'menuX', 'menuY', 'menuW', 'menuH'];
+const persistedKeys = ['version', 'visible', 'showPawWhenHidden', 'name', 'x', 'y', 'scale', 'menuX', 'menuY', 'menuW', 'menuH'];
 let runtimeSettings = null;
 let initialized = false;
 let desktopRoot = null;
@@ -94,6 +95,7 @@ function getSettings() {
 
     hydrated.version = EXTENSION_VERSION;
     hydrated.visible = stored.visible ?? defaultSettings.visible;
+    hydrated.showPawWhenHidden = stored.showPawWhenHidden ?? defaultSettings.showPawWhenHidden;
     hydrated.name = stored.name ?? defaultSettings.name;
     hydrated.x = stored.x ?? defaultSettings.x;
     hydrated.y = stored.y ?? defaultSettings.y;
@@ -453,20 +455,17 @@ function bindMenuMoveResizeEvents() {
         if (!petMenu.classList.contains('bcc-show')) return;
 
         const target = event.target;
+        const resizeHandle = target.closest('.bcc-menu-resize-handle');
+        const moveHandle = target.closest('.bcc-menu-title-row, .bcc-menu-drag-hint');
+
+        // 内容区、按钮、拉条区域不劫持触摸，手机端可正常上下滑动。
+        if (!resizeHandle && !moveHandle) return;
         if (target.closest('button, input, .bcc-btn, .bcc-close, .bcc-scale-control')) return;
 
         const rect = petMenu.getBoundingClientRect();
-        const edge = 18;
-        const nearRight = event.clientX >= rect.right - edge;
-        const nearBottom = event.clientY >= rect.bottom - edge;
-        const nearLeft = event.clientX <= rect.left + edge;
-        const nearTop = event.clientY <= rect.top + edge;
-        const titleRow = target.closest('.bcc-menu-title-row, .bcc-menu-drag-hint');
-
-        if (!(nearRight || nearBottom || nearLeft || nearTop || titleRow || target === petMenu)) return;
 
         menuDragState.active = true;
-        menuDragState.mode = (nearRight || nearBottom) ? 'resize' : 'move';
+        menuDragState.mode = resizeHandle ? 'resize' : 'move';
         menuDragState.startX = event.clientX;
         menuDragState.startY = event.clientY;
         menuDragState.startLeft = rect.left;
@@ -487,25 +486,30 @@ function bindMenuMoveResizeEvents() {
         const dy = event.clientY - menuDragState.startY;
 
         if (menuDragState.mode === 'resize') {
-            const minW = 240;
+            const minW = Math.min(240, window.innerWidth - 16);
             const maxW = Math.min(520, window.innerWidth - 16);
-            const minH = 220;
+            const minH = Math.min(220, window.innerHeight - 16);
             const maxH = Math.min(window.innerHeight - 16, 760);
+
             const w = clamp(menuDragState.startWidth + dx, minW, maxW);
             const h = clamp(menuDragState.startHeight + dy, minH, maxH);
 
             settings.menuW = w;
             settings.menuH = h;
+
             petMenu.style.width = `${w}px`;
+            petMenu.style.height = `${h}px`;
             petMenu.style.maxHeight = `${h}px`;
         } else {
             const width = petMenu.offsetWidth || menuDragState.startWidth;
             const height = petMenu.offsetHeight || menuDragState.startHeight;
+
             const left = clamp(menuDragState.startLeft + dx, 8, window.innerWidth - width - 8);
             const top = clamp(menuDragState.startTop + dy, 8, window.innerHeight - height - 8);
 
             settings.menuX = left;
             settings.menuY = top;
+
             petMenu.style.left = `${left}px`;
             petMenu.style.top = `${top}px`;
             petMenu.style.right = 'auto';
@@ -518,14 +522,19 @@ function bindMenuMoveResizeEvents() {
 
     petMenu.addEventListener('pointerup', (event) => {
         if (!menuDragState.active) return;
+
         menuDragState.active = false;
         petMenu.releasePointerCapture?.(event.pointerId);
         persist();
+
         event.preventDefault();
         event.stopPropagation();
     });
-}
 
+    petMenu.addEventListener('pointercancel', () => {
+        menuDragState.active = false;
+    });
+}
 function bindDesktopPetEvents() {
     if (!catButton) return;
     document.addEventListener('pointerdown', handleOutsidePetMenuPointerDown, true);
@@ -670,7 +679,7 @@ function updateDesktopPet() {
 
     const shouldShow = settings.visible;
     catButton.classList.toggle('bcc-hidden', !shouldShow);
-    pawButton?.classList.toggle('bcc-hidden', shouldShow);
+    pawButton?.classList.toggle('bcc-hidden', shouldShow || !settings.showPawWhenHidden);
     catButton.classList.remove('bcc-pose-sit', 'bcc-pose-alert', 'bcc-pose-sleep', 'bcc-pose-happy', 'bcc-pose-talk', 'bcc-pose-play', 'bcc-pose-loaf');
     catButton.classList.add(`bcc-pose-${pose}`);
     catButton.classList.toggle('bcc-hungry', settings.hunger < 30);
@@ -709,7 +718,7 @@ function updatePetMenu() {
         ${statMarkup('精力', settings.energy)}
         ${statMarkup('亲密', settings.affection)}
 
-        <div class="bcc-menu-drag-hint">长按菜单边框可移动；拖右下角可缩放</div>
+        <div class="bcc-menu-drag-hint">拖标题移动菜单；拖右下角↘缩放；内容区可上下滑动</div>
         <div class="bcc-pet-actions">
             <button class="bcc-btn ${settings.activeAction === 'feed' ? 'bcc-active' : ''}" data-bcc-action="feed">🍗 喂食</button>
             <button class="bcc-btn ${settings.activeAction === 'pet' ? 'bcc-active' : ''}" data-bcc-action="pet">🤍 摸摸</button>
@@ -728,6 +737,8 @@ function updatePetMenu() {
             </div>
             <button class="bcc-btn bcc-full ${settings.activeAction === 'resetState' ? 'bcc-active' : ''}" data-bcc-action="resetState">↺ 重置状态</button>
         </div>
+
+        <div class="bcc-menu-resize-handle" title="拖动缩放菜单">↘</div>
     `;
 
     petMenuContent.querySelector('[data-bcc-close]')?.addEventListener('click', () => {
@@ -788,7 +799,12 @@ function placeMenu() {
     const width = savedW || Math.min(310, window.innerWidth - 20);
 
     petMenu.style.width = `${width}px`;
-    if (savedH) petMenu.style.maxHeight = `${savedH}px`;
+    if (savedH) {
+        petMenu.style.height = `${savedH}px`;
+        petMenu.style.maxHeight = `${savedH}px`;
+    } else {
+        petMenu.style.height = 'auto';
+    }
 
     if (settings.menuX !== null && settings.menuY !== null) {
         const height = petMenu.offsetHeight || savedH || 290;
@@ -952,6 +968,7 @@ function handleAction(action) {
     if (action === 'hide') {
         settings.activeAction = 'hide';
         settings.visible = false;
+        settings.showPawWhenHidden = true;
         persist();
         petMenu?.classList.remove('bcc-show');
         renderBubble('小黑猫钻进阴影里了。');
@@ -987,6 +1004,7 @@ function resetPosition() {
     settings.x = centered.x;
     settings.y = centered.y;
     settings.visible = true;
+    settings.showPawWhenHidden = false;
     persist();
     refreshAllUi();
     renderBubble('小黑猫回到了聊天桌面中央。');
@@ -1018,6 +1036,7 @@ function bindSettingsMenuEvents() {
     $('#black_cat_toggle').on('click', () => {
         const settings = getSettings();
         settings.visible = !settings.visible;
+        settings.showPawWhenHidden = false; // 扩展菜单隐藏 = 完全隐藏，不留猫爪
         if (settings.visible && (settings.x === null || settings.y === null)) {
             const centered = getCenteredPosition();
             settings.x = centered.x;
@@ -1427,7 +1446,7 @@ async function appendSettingsWindow() {
                                 <div id="black_cat_toggle" class="menu_button">隐藏小黑猫</div>
                                 <div id="black_cat_reset_position" class="menu_button">复位到中央</div>
                             </div>
-                            <small class="bcc-lite-hint">这里只是控制入口。小黑猫会出现在聊天桌面，可以拖到任意位置；点击小黑猫本体打开互动菜单。隐藏后桌面会留下一个猫爪，点击猫爪就能把小黑猫叫回来。</small>
+                            <small class="bcc-lite-hint">这里只是控制入口。扩展菜单里的隐藏会完全隐藏小黑猫；如果想留下猫爪，请在小黑猫互动菜单里点隐藏。</small>
                         </div>
                     </div>
                 </div>

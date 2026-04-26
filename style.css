@@ -513,3 +513,63 @@
     }
 }
 
+
+
+/* v6.13: mobile-friendly menu drag/resize.
+   只有标题/提示文字可拖动，右下角按钮可缩放；内容区域保留正常上下滑动。 */
+.bcc-pet-menu {
+    touch-action: auto !important;
+    overflow: auto !important;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+}
+
+.bcc-pet-menu::after {
+    content: none !important;
+    display: none !important;
+}
+
+.bcc-menu-title-row,
+.bcc-menu-drag-hint {
+    touch-action: none;
+}
+
+.bcc-menu-drag-hint {
+    cursor: move;
+}
+
+.bcc-menu-resize-handle {
+    position: sticky;
+    right: 0;
+    bottom: 0;
+    margin-left: auto;
+    margin-top: 8px;
+    width: 38px;
+    height: 38px;
+    border-radius: 14px;
+    display: grid;
+    place-items: center;
+    cursor: nwse-resize;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    pointer-events: auto;
+    background: rgba(255,255,255,.74);
+    color: #cc7ea2;
+    font-weight: 900;
+    box-shadow: 0 6px 16px rgba(255, 130, 180, .18);
+}
+
+@media (max-width: 640px) {
+    .bcc-menu-resize-handle {
+        width: 46px;
+        height: 46px;
+        border-radius: 16px;
+        font-size: 18px;
+    }
+
+    .bcc-menu-drag-hint {
+        font-size: 11px;
+        opacity: .78;
+    }
+}
