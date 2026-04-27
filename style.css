@@ -606,3 +606,134 @@
 .bcc-pet-menu .bcc-menu-resize-handle {
     pointer-events: auto;
 }
+
+
+/* v6.27：状态小框可拖动；新睡觉/摸头素材做了更轻量转码 */
+.bcc-pet-bubble {
+    cursor: move;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+    white-space: pre-line;
+}
+.bcc-pet-bubble.bcc-show { pointer-events: auto; }
+
+
+/* v6.28：长按罗小黑素材图层 0.2 秒后进入眼珠跟随 */
+.bcc-eye-layer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    display: none;
+    z-index: 4;
+}
+
+.bcc-cat-button.bcc-eye-follow.bcc-pose-sit .bcc-eye-layer {
+    display: block;
+}
+
+.bcc-gaze-pupils {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 124px;
+    height: 124px;
+    object-fit: contain;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-drag: none;
+    transform: translate3d(0, 0, 0);
+    transition: none;
+    filter: none !important;
+}
+
+
+/* v7.0 罗小黑大脑设置区 */
+.bcc-lite-sep {
+    border: none;
+    border-top: 1px solid rgba(120, 90, 105, .18);
+    margin: 12px 0;
+}
+
+.bcc-section-title {
+    font-weight: 800;
+    margin: 8px 0 10px;
+    font-size: 13px;
+}
+
+.bcc-brain-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.bcc-field,
+.bcc-check {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+}
+
+.bcc-check {
+    flex-direction: row;
+    align-items: center;
+}
+
+.bcc-field span,
+.bcc-check span {
+    opacity: .78;
+}
+
+.bcc-field input,
+.bcc-field select {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid rgba(120, 90, 105, .22);
+    border-radius: 10px;
+    padding: 7px 9px;
+    background: rgba(255, 255, 255, .78);
+    color: inherit;
+}
+
+.bcc-field-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.bcc-api-details {
+    border: 1px solid rgba(120, 90, 105, .14);
+    border-radius: 12px;
+    padding: 8px;
+    background: rgba(255, 255, 255, .38);
+}
+
+.bcc-api-details summary {
+    cursor: pointer;
+    font-weight: 700;
+    margin-bottom: 8px;
+}
+
+@media (max-width: 640px) {
+    .bcc-field-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+
+/* v7.1：扩展菜单内的剧情预览框 */
+.bcc-brain-preview-output {
+    margin-top: 6px;
+    max-height: 180px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    border: 1px solid rgba(120, 90, 105, .18);
+    border-radius: 12px;
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, .62);
+    font-size: 12px;
+    line-height: 1.45;
+    opacity: .92;
+}

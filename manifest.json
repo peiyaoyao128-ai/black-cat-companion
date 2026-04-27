@@ -1,12 +1,12 @@
 {
-  "display_name": "小黑猫桌宠",
+  "display_name": "罗小黑桌宠",
   "loading_order": 14,
   "requires": [],
   "optional": [],
   "js": "index.js",
   "css": "style.css",
   "author": "OpenAI / yaoyao",
-  "version": "0.6.23",
+  "version": "0.7.1",
   "homePage": "https://github.com/peiyaoyao128-ai/black-cat",
   "auto_update": true
 }

@@ -1,28 +1,124 @@
 <div id="black_cat_settings">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b>小黑猫桌宠</b>
+            <b>罗小黑桌宠</b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
 
         <div class="inline-drawer-content">
             <div class="bcc-lite-settings">
                 <div class="bcc-lite-row">
-                    <img id="black_cat_menu_preview" class="bcc-menu-preview" alt="小黑猫" draggable="false">
+                    <img id="black_cat_menu_preview" class="bcc-menu-preview" alt="罗小黑" draggable="false">
                     <div>
-                        <div id="black_cat_menu_name" class="bcc-menu-name">小黑</div>
+                        <div id="black_cat_menu_name" class="bcc-menu-name">罗小黑</div>
                         <div id="black_cat_menu_status" class="bcc-menu-status">它安静地趴着。</div>
                     </div>
                 </div>
 
                 <div class="bcc-lite-controls">
-                    <div id="black_cat_toggle" class="menu_button">隐藏小黑猫</div>
+                    <div id="black_cat_toggle" class="menu_button">隐藏罗小黑</div>
                     <div id="black_cat_reset_position" class="menu_button">复位到中央</div>
                 </div>
 
                 <small class="bcc-lite-hint">
-                    这里只是控制入口。小黑猫会出现在聊天桌面，可以拖到任意位置；点击小黑猫本体打开互动菜单。这版已替换成你上传的小黑猫动态动作素材，并更新了摸头/吃东西动作；扩展菜单里的隐藏会完全隐藏小黑猫，互动菜单里的隐藏才会留下猫爪。
+                    这里只是控制入口。罗小黑会出现在聊天桌面，可以拖到任意位置；点击罗小黑本体打开互动菜单。扩展菜单里的隐藏会完全隐藏罗小黑，互动菜单里的隐藏才会留下猫爪。
                 </small>
+
+                <hr class="bcc-lite-sep">
+
+                <div class="bcc-brain-settings">
+                    <div class="bcc-section-title">罗小黑大脑 v7.0 测试</div>
+
+                    <label class="bcc-field">
+                        <span>生成来源</span>
+                        <select id="black_cat_brain_provider">
+                            <option value="tavern">使用酒馆当前 API</option>
+                            <option value="custom">使用独立 API</option>
+                            <option value="custom_then_tavern">优先独立 API，失败用酒馆 API</option>
+                            <option value="tavern_then_custom">优先酒馆 API，失败用独立 API</option>
+                        </select>
+                    </label>
+
+                    <label class="bcc-field">
+                        <span>吐槽风格</span>
+                        <select id="black_cat_brain_style">
+                            <option value="cute">可爱夸夸</option>
+                            <option value="roast">轻度吐槽</option>
+                            <option value="analysis">剧情解读</option>
+                            <option value="companion">陪读小猫</option>
+                        </select>
+                    </label>
+
+                    <label class="bcc-field">
+                        <span>读取范围</span>
+                        <select id="black_cat_brain_range">
+                            <option value="1">最后 1 条消息</option>
+                            <option value="3">最近 3 条消息</option>
+                            <option value="5">最近 5 条消息</option>
+                        </select>
+                    </label>
+
+                    <div class="bcc-field-grid">
+                        <label class="bcc-field">
+                            <span>最大剧情字数</span>
+                            <input id="black_cat_brain_max_chars" type="number" min="300" max="4000" step="100">
+                        </label>
+                        <label class="bcc-field">
+                            <span>回复上限</span>
+                            <input id="black_cat_brain_max_tokens" type="number" min="40" max="400" step="10">
+                        </label>
+                    </div>
+
+                    <details class="bcc-api-details">
+                        <summary>独立 API 设置</summary>
+
+                        <label class="bcc-field">
+                            <span>API 地址 / OpenAI 兼容</span>
+                            <input id="black_cat_custom_api_url" type="text" placeholder="https://api.example.com/v1/chat/completions">
+                        </label>
+
+                        <label class="bcc-field">
+                            <span>模型</span>
+                            <input id="black_cat_custom_model" type="text" placeholder="gpt-4o-mini / deepseek-chat / ...">
+                        </label>
+
+                        <label class="bcc-field">
+                            <span>API Key</span>
+                            <input id="black_cat_custom_api_key" type="password" placeholder="只保存在你自己的酒馆设置里">
+                        </label>
+
+                        <label class="bcc-field">
+                            <span>温度</span>
+                            <input id="black_cat_brain_temperature" type="number" min="0" max="2" step="0.1">
+                        </label>
+
+                        <div class="bcc-lite-controls">
+                            <div id="black_cat_test_custom_api" class="menu_button">测试独立 API</div>
+                            <div id="black_cat_clear_custom_key" class="menu_button">清空 Key</div>
+                        </div>
+                    </details>
+
+                    <label class="bcc-check">
+                        <input id="black_cat_brain_debug" type="checkbox">
+                        <span>调试模式：吐槽前显示读取到的剧情预览</span>
+                    </label>
+
+                    <div class="bcc-lite-controls">
+                        <div id="black_cat_preview_story" class="menu_button">预览剧情</div>
+                        <div id="black_cat_brain_comment" class="menu_button">吐槽当前剧情</div>
+                        <div id="black_cat_test_tavern_api" class="menu_button">测试酒馆 API</div>
+                    </div>
+
+                    <div id="black_cat_brain_preview_output" class="bcc-brain-preview-output">
+                        点击“预览剧情”后，罗小黑会把准备发送给 API 的剧情显示在这里。
+                    </div>
+
+
+                    <small class="bcc-lite-hint">
+                        独立 API 的 Key 由每个使用者自己填写，只保存在自己的酒馆设置里；公开仓库不会包含任何 Key。当前版本先做手动触发，不自动监听剧情。
+                    </small>
+                </div>
+
             </div>
         </div>
     </div>

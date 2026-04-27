@@ -6,7 +6,7 @@ export { MODULE_NAME };
 const MODULE_NAME = 'black_cat_companion';
 const DEBUG_PREFIX = '<BlackCatCompanion> ';
 const UPDATE_INTERVAL = 2000;
-const EXTENSION_VERSION = '0.6.23';
+const EXTENSION_VERSION = '0.7.1';
 
 const windowHtmlPath = new URL('./window.html', import.meta.url).href;
 
@@ -15,7 +15,7 @@ const defaultSettings = {
     version: EXTENSION_VERSION,
     visible: true,
     showPawWhenHidden: false,
-    name: '小黑',
+    name: '罗小黑',
     hunger: 72,
     mood: 70,
     energy: 76,
@@ -33,15 +33,28 @@ const defaultSettings = {
     lastTick: Date.now(),
     effectPose: null,
     effectUntil: 0,
+
+    brainProvider: 'tavern',
+    brainStyle: 'cute',
+    brainRange: 1,
+    brainMaxChars: 1500,
+    brainMaxTokens: 120,
+    brainTemperature: 0.8,
+    brainCustomApiUrl: '',
+    brainCustomModel: '',
+    brainCustomApiKey: '',
+    brainDebug: true,
 };
 
-const persistedKeys = ['version', 'visible', 'showPawWhenHidden', 'name', 'x', 'y', 'scale', 'menuX', 'menuY', 'menuW', 'menuH'];
+const persistedKeys = ['version', 'visible', 'showPawWhenHidden', 'name', 'x', 'y', 'scale', 'menuX', 'menuY', 'menuW', 'menuH', 'brainProvider', 'brainStyle', 'brainRange', 'brainMaxChars', 'brainMaxTokens', 'brainTemperature', 'brainCustomApiUrl', 'brainCustomModel', 'brainCustomApiKey', 'brainDebug'];
 let runtimeSettings = null;
 let initialized = false;
 let desktopRoot = null;
 let catButton = null;
 let pawButton = null;
 let catImage = null;
+let eyeLayer = null;
+let gazePupils = null;
 let catBadge = null;
 let catAssetNonce = 0;
 let petMenu = null;
@@ -49,6 +62,14 @@ let petMenuContent = null;
 let bubble = null;
 let dragRaf = null;
 let pendingDragPosition = null;
+let gazeHoldTimer = null;
+let gazeReleaseTimer = null;
+let eyeFollowActive = false;
+let lastGazePoint = null;
+let gazeTargetOffset = { x: 0, y: 0 };
+let gazeCurrentOffset = { x: 0, y: 0 };
+let gazePupilRaf = null;
+
 
 let dragState = {
     active: false,
@@ -79,6 +100,15 @@ let menuDragState = {
     startHeight: 0,
 };
 
+let bubbleDragState = {
+    active: false,
+    moved: false,
+    startX: 0,
+    startY: 0,
+    startLeft: 0,
+    startTop: 0,
+};
+
 function cloneObject(obj) {
     return JSON.parse(JSON.stringify(obj));
 }
@@ -105,6 +135,16 @@ function getSettings() {
     hydrated.menuY = stored.menuY ?? defaultSettings.menuY;
     hydrated.menuW = stored.menuW ?? defaultSettings.menuW;
     hydrated.menuH = stored.menuH ?? defaultSettings.menuH;
+    hydrated.brainProvider = stored.brainProvider ?? defaultSettings.brainProvider;
+    hydrated.brainStyle = stored.brainStyle ?? defaultSettings.brainStyle;
+    hydrated.brainRange = Number(stored.brainRange ?? defaultSettings.brainRange);
+    hydrated.brainMaxChars = Number(stored.brainMaxChars ?? defaultSettings.brainMaxChars);
+    hydrated.brainMaxTokens = Number(stored.brainMaxTokens ?? defaultSettings.brainMaxTokens);
+    hydrated.brainTemperature = Number(stored.brainTemperature ?? defaultSettings.brainTemperature);
+    hydrated.brainCustomApiUrl = stored.brainCustomApiUrl ?? defaultSettings.brainCustomApiUrl;
+    hydrated.brainCustomModel = stored.brainCustomModel ?? defaultSettings.brainCustomModel;
+    hydrated.brainCustomApiKey = stored.brainCustomApiKey ?? defaultSettings.brainCustomApiKey;
+    hydrated.brainDebug = stored.brainDebug ?? defaultSettings.brainDebug;
     hydrated.lastTick = Date.now();
 
     runtimeSettings = hydrated;
@@ -363,18 +403,118 @@ function bindPetMenuEventIsolation() {
     });
 }
 
+
+function getEyeBaseAssetPath() {
+    return assetPath('cat-sit-eyebase.webp');
+}
+
+function getGazePupilsAssetPath() {
+    return assetPath('gaze-pupils.png');
+}
+
+function clearGazeHoldTimer() {
+    clearTimeout(gazeHoldTimer);
+    gazeHoldTimer = null;
+}
+
+function setGazePupilTransform(x = 0, y = 0) {
+    if (!gazePupils) return;
+    gazePupils.style.transform = `translate3d(${x.toFixed(2)}px, ${y.toFixed(2)}px, 0)`;
+}
+
+function ensureGazeAnimation() {
+    if (gazePupilRaf) return;
+    gazePupilRaf = requestAnimationFrame(animateGazePupils);
+}
+
+function animateGazePupils() {
+    if (!gazePupils) {
+        gazePupilRaf = null;
+        return;
+    }
+
+    gazeCurrentOffset.x += (gazeTargetOffset.x - gazeCurrentOffset.x) * 0.18;
+    gazeCurrentOffset.y += (gazeTargetOffset.y - gazeCurrentOffset.y) * 0.18;
+
+    if (Math.abs(gazeCurrentOffset.x - gazeTargetOffset.x) < 0.05) gazeCurrentOffset.x = gazeTargetOffset.x;
+    if (Math.abs(gazeCurrentOffset.y - gazeTargetOffset.y) < 0.05) gazeCurrentOffset.y = gazeTargetOffset.y;
+
+    setGazePupilTransform(gazeCurrentOffset.x, gazeCurrentOffset.y);
+
+    const stillMoving = Math.abs(gazeCurrentOffset.x - gazeTargetOffset.x) >= 0.05 || Math.abs(gazeCurrentOffset.y - gazeTargetOffset.y) >= 0.05;
+    if (eyeFollowActive || stillMoving) {
+        gazePupilRaf = requestAnimationFrame(animateGazePupils);
+    } else {
+        gazePupilRaf = null;
+    }
+}
+
+function getGazeVector(clientX, clientY) {
+    if (!catButton) return { dx: 0, dy: 0 };
+    const rect = catButton.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height * 0.45;
+    const nx = clamp((clientX - cx) / Math.max(22, rect.width * 0.34), -1, 1);
+    const ny = clamp((clientY - cy) / Math.max(18, rect.height * 0.28), -1, 1);
+    return { dx: nx, dy: ny };
+}
+
+function updateGazePupils(clientX = null, clientY = null) {
+    if (!gazePupils) return;
+
+    let vector = { dx: 0, dy: 0 };
+    if (clientX !== null && clientY !== null) {
+        vector = getGazeVector(clientX, clientY);
+        lastGazePoint = { x: clientX, y: clientY };
+    } else if (lastGazePoint) {
+        vector = getGazeVector(lastGazePoint.x, lastGazePoint.y);
+    }
+
+    gazeTargetOffset = {
+        x: vector.dx * 2.7,
+        y: vector.dy * 1.8,
+    };
+    ensureGazeAnimation();
+}
+
+function activateEyeFollow(clientX, clientY) {
+    const settings = getSettings();
+    if (!settings.visible) return;
+
+    eyeFollowActive = true;
+    dragState.moved = true;
+    clearTimeout(gazeReleaseTimer);
+    lastGazePoint = { x: clientX, y: clientY };
+    updateGazePupils(clientX, clientY);
+    refreshAllUi();
+}
+
+function deactivateEyeFollow(delay = 120) {
+    clearTimeout(gazeReleaseTimer);
+    gazeReleaseTimer = setTimeout(() => {
+        eyeFollowActive = false;
+        lastGazePoint = null;
+        gazeTargetOffset = { x: 0, y: 0 };
+        ensureGazeAnimation();
+        refreshAllUi();
+    }, delay);
+}
+
 function createDesktopPet() {
     if (desktopRoot) return;
 
     desktopRoot = document.createElement('div');
     desktopRoot.id = 'bcc-desktop-root';
     desktopRoot.innerHTML = `
-        <button id="bcc-cat-button" class="bcc-cat-button" type="button" title="小黑猫">
-            <img id="bcc-cat-image" class="bcc-cat-image" alt="小黑猫" draggable="false">
+        <button id="bcc-cat-button" class="bcc-cat-button" type="button" title="">
+            <img id="bcc-cat-image" class="bcc-cat-image" alt="罗小黑" draggable="false">
+            <span id="bcc-eye-layer" class="bcc-eye-layer" aria-hidden="true">
+                <img id="bcc-gaze-pupils" class="bcc-gaze-pupils" alt="" draggable="false">
+            </span>
             <span id="bcc-cat-badge" class="bcc-cat-badge">✦</span>
         </button>
 
-        <button id="bcc-paw-button" class="bcc-paw-button" type="button" title="点击叫回小黑猫">🐾</button>
+        <button id="bcc-paw-button" class="bcc-paw-button" type="button" title="点击叫回罗小黑">🐾</button>
 
         <div id="bcc-pet-bubble" class="bcc-pet-bubble"></div>
 
@@ -387,7 +527,10 @@ function createDesktopPet() {
     catButton = document.getElementById('bcc-cat-button');
     pawButton = document.getElementById('bcc-paw-button');
     catImage = document.getElementById('bcc-cat-image');
+    eyeLayer = document.getElementById('bcc-eye-layer');
+    gazePupils = document.getElementById('bcc-gaze-pupils');
     catBadge = document.getElementById('bcc-cat-badge');
+    if (gazePupils) gazePupils.src = getGazePupilsAssetPath();
     petMenu = document.getElementById('bcc-pet-menu');
     petMenuContent = document.getElementById('bcc-pet-menu-content');
     bubble = document.getElementById('bcc-pet-bubble');
@@ -401,6 +544,7 @@ function createDesktopPet() {
     bindDesktopPetEvents();
     bindPawDragEvents();
     bindMenuMoveResizeEvents();
+    bindBubbleDragEvents();
 }
 
 
@@ -465,7 +609,7 @@ function bindPawDragEvents() {
             settings.effectUntil = Date.now() + 1800;
             persist();
             refreshAllUi();
-            renderBubble('喵。小黑猫被你叫回来了。');
+            renderBubble('喵。罗小黑被你叫回来了。');
         }
 
         event.preventDefault();
@@ -473,6 +617,55 @@ function bindPawDragEvents() {
     });
 }
 
+
+
+
+function bindBubbleDragEvents() {
+    if (!bubble || bubble.dataset.bccBubbleDragBound === '1') return;
+    bubble.dataset.bccBubbleDragBound = '1';
+
+    bubble.addEventListener('pointerdown', (event) => {
+        if (!bubble.classList.contains('bcc-show')) return;
+        const rect = bubble.getBoundingClientRect();
+        bubbleDragState.active = true;
+        bubbleDragState.moved = false;
+        bubbleDragState.startX = event.clientX;
+        bubbleDragState.startY = event.clientY;
+        bubbleDragState.startLeft = rect.left;
+        bubbleDragState.startTop = rect.top;
+        bubble.setPointerCapture?.(event.pointerId);
+        event.preventDefault();
+        event.stopPropagation();
+    });
+
+    bubble.addEventListener('pointermove', (event) => {
+        if (!bubbleDragState.active) return;
+        const dx = event.clientX - bubbleDragState.startX;
+        const dy = event.clientY - bubbleDragState.startY;
+        const width = bubble.offsetWidth || 220;
+        const height = bubble.offsetHeight || 80;
+        const left = clamp(bubbleDragState.startLeft + dx, 8, window.innerWidth - width - 8);
+        const top = clamp(bubbleDragState.startTop + dy, 8, window.innerHeight - height - 8);
+        bubble.style.left = `${left}px`;
+        bubble.style.top = `${top}px`;
+        bubble.style.right = 'auto';
+        bubble.style.bottom = 'auto';
+        event.preventDefault();
+        event.stopPropagation();
+    });
+
+    bubble.addEventListener('pointerup', (event) => {
+        if (!bubbleDragState.active) return;
+        bubbleDragState.active = false;
+        bubble.releasePointerCapture?.(event.pointerId);
+        event.preventDefault();
+        event.stopPropagation();
+    });
+
+    bubble.addEventListener('pointercancel', () => {
+        bubbleDragState.active = false;
+    });
+}
 
 
 function bindMenuMoveResizeEvents() {
@@ -579,6 +772,17 @@ function bindDesktopPetEvents() {
         dragState.offsetY = event.clientY - rect.top;
         petMenu?.classList.remove('bcc-show');
         bubble?.classList.remove('bcc-show');
+
+        clearGazeHoldTimer();
+        clearTimeout(gazeReleaseTimer);
+        const gazeStartX = event.clientX;
+        const gazeStartY = event.clientY;
+        gazeHoldTimer = setTimeout(() => {
+            if (dragState.active && !dragState.moved) {
+                activateEyeFollow(gazeStartX, gazeStartY);
+            }
+        }, 200);
+
         catButton.setPointerCapture?.(event.pointerId);
         event.preventDefault();
     });
@@ -586,10 +790,18 @@ function bindDesktopPetEvents() {
     catButton.addEventListener('pointermove', (event) => {
         if (!dragState.active) return;
 
+        if (eyeFollowActive) {
+            updateGazePupils(event.clientX, event.clientY);
+            dragState.moved = true;
+            event.preventDefault();
+            return;
+        }
+
         const dx = event.clientX - dragState.startX;
         const dy = event.clientY - dragState.startY;
         if (Math.abs(dx) + Math.abs(dy) > 5) {
             dragState.moved = true;
+            clearGazeHoldTimer();
         }
 
         const x = clamp(event.clientX - dragState.offsetX, 4, window.innerWidth - catButton.offsetWidth - 4);
@@ -610,8 +822,18 @@ function bindDesktopPetEvents() {
 
     catButton.addEventListener('pointerup', (event) => {
         if (!dragState.active) return;
-        dragState.active = false;
+        clearGazeHoldTimer();
         catButton.releasePointerCapture?.(event.pointerId);
+
+        if (eyeFollowActive) {
+            dragState.active = false;
+            pendingDragPosition = null;
+            deactivateEyeFollow(120);
+            event.preventDefault();
+            return;
+        }
+
+        dragState.active = false;
 
         if (pendingDragPosition) {
             const settings = getSettings();
@@ -707,17 +929,21 @@ function updateDesktopPet() {
     const shouldShow = settings.visible;
     catButton.classList.toggle('bcc-hidden', !shouldShow);
     pawButton?.classList.toggle('bcc-hidden', shouldShow || !settings.showPawWhenHidden);
+    const shouldEyeFollow = eyeFollowActive;
+    const visualPose = shouldEyeFollow ? 'sit' : pose;
     catButton.classList.remove('bcc-pose-sit', 'bcc-pose-alert', 'bcc-pose-sleep', 'bcc-pose-happy', 'bcc-pose-talk', 'bcc-pose-play', 'bcc-pose-loaf');
-    catButton.classList.add(`bcc-pose-${pose}`);
+    catButton.classList.add(`bcc-pose-${visualPose}`);
     catButton.classList.toggle('bcc-hungry', settings.hunger < 30);
 
-    catButton.title = `${settings.name}｜${getMoodText(settings)}`;
-    const nextAsset = getCatAssetPath(settings);
+    catButton.title = '';
+    catButton.classList.toggle('bcc-eye-follow', shouldEyeFollow);
+    const nextAsset = shouldEyeFollow ? getEyeBaseAssetPath() : getCatAssetPath(settings);
     const displayAsset = `${nextAsset}${nextAsset.includes('?') ? '&' : '?'}bccv=${catAssetNonce}`;
     if (catImage.getAttribute('src') !== displayAsset) {
         catImage.src = displayAsset;
     }
     catImage.alt = settings.name;
+    if (shouldEyeFollow) updateGazePupils();
 
     catBadge.textContent = '';
     catBadge.setAttribute('aria-hidden', 'true');
@@ -758,10 +984,11 @@ function updatePetMenu() {
             <button class="bcc-btn ${settings.activeAction === 'sit' ? 'bcc-active' : ''}" data-bcc-action="sit">🐾 趴趴</button>
             <button class="bcc-btn ${settings.activeAction === 'alert' ? 'bcc-active' : ''}" data-bcc-action="alert">👀 警觉</button>
             <button class="bcc-btn ${settings.activeAction === 'status' ? 'bcc-active' : ''}" data-bcc-action="status">📋 状态</button>
+            <button class="bcc-btn ${settings.activeAction === 'brainComment' ? 'bcc-active' : ''}" data-bcc-action="brainComment">💬 罗小黑评剧情</button>
             <button class="bcc-btn" data-bcc-action="hide">🙈 隐藏</button>
             <div class="bcc-scale-control bcc-full">
                 <div class="bcc-scale-head">
-                    <span>小黑猫大小</span>
+                    <span>罗小黑大小</span>
                     <b id="bcc-scale-value">${Math.round((settings.scale ?? 1) * 100)}%</b>
                 </div>
                 <input id="bcc-scale-slider" type="range" min="70" max="160" step="1" value="${Math.round((settings.scale ?? 1) * 100)}">
@@ -802,7 +1029,7 @@ function updatePetMenu() {
         if (scaleValue) scaleValue.textContent = `${Math.round(settings.scale * 100)}%`;
 
         // 滑动时只改 transform，不重绘菜单、不重新设置图片 src，
-        // 这样小黑猫和互动菜单都不会跟着抖。
+        // 这样罗小黑和互动菜单都不会跟着抖。
         applyDesktopPosition();
         applyPawPosition();
 
@@ -915,6 +1142,8 @@ function placeBubble() {
 }
 
 function handleAction(action) {
+    eyeFollowActive = false;
+    clearGazeHoldTimer();
     const settings = getSettings();
     tick(settings);
     if (action !== 'hide') settings.activeAction = action;
@@ -926,11 +1155,11 @@ function handleAction(action) {
         settings.mood = clamp(settings.mood + 8);
         settings.energy = clamp(settings.energy + 3);
         settings.affection = clamp(settings.affection + 3);
-        setTransientPose('talk', 7600);
+        setTransientPose('talk', 10567);
         renderBubble(randomItem([
             '喵呜。它叼走小鱼干，嚼完还冲你眨了下眼。',
             '它吃得很认真，耳朵都满足地抖了一下。',
-            '小黑猫埋头吃了几口，看起来被你哄好了。',
+            '罗小黑埋头吃了几口，看起来被你哄好了。',
         ]));
     }
 
@@ -943,7 +1172,7 @@ function handleAction(action) {
             settings.mood = clamp(settings.mood + 12);
             settings.affection = clamp(settings.affection + 6);
             settings.energy = clamp(settings.energy - 2);
-            setTransientPose('happy', 10733);
+            setTransientPose('happy', 10533);
             renderBubble(randomItem([
                 '它眯起眼，喉咙里咕噜咕噜的。',
                 '它把脑袋往你手心蹭了蹭，看起来很受用。',
@@ -964,10 +1193,10 @@ function handleAction(action) {
             settings.energy = clamp(settings.energy - 16);
             settings.mood = clamp(settings.mood + 14);
             settings.affection = clamp(settings.affection + 5);
-            setTransientPose('play', 10600);
+            setTransientPose('play', 10533);
             renderBubble(randomItem([
                 '它一下来了精神，爪子都举起来了。',
-                '小黑猫扑腾了一下，像一团突然起飞的小黑影。',
+                '罗小黑扑腾了一下，像一团突然起飞的罗小黑影。',
                 '它追着你的动作看了好几眼，玩兴被勾起来了。',
             ]));
         }
@@ -981,10 +1210,10 @@ function handleAction(action) {
         if (settings.sleeping) {
             settings.energy = clamp(settings.energy + 8);
             settings.mood = clamp(settings.mood + 2);
-            renderBubble('小黑猫蜷成一团睡着了。');
+            renderBubble('罗小黑蜷成一团睡着了。');
         } else {
-            setTransientPose('happy', 10733);
-            renderBubble('小黑猫醒了，懒洋洋地伸了个小懒腰。');
+            setTransientPose('happy', 10533);
+            renderBubble('罗小黑醒了，懒洋洋地伸了个小懒腰。');
         }
     }
 
@@ -993,7 +1222,7 @@ function handleAction(action) {
         settings.pose = 'loaf';
         settings.mood = clamp(settings.mood + 2);
         setTransientPose('loaf', 1800);
-        renderBubble('小黑猫重新趴回你的酒馆角落。');
+        renderBubble('罗小黑重新趴回你的酒馆角落。');
     }
 
     if (action === 'alert') {
@@ -1009,13 +1238,21 @@ function handleAction(action) {
         showStatusBubble();
     }
 
+    if (action === 'brainComment') {
+        settings.activeAction = 'brainComment';
+        petMenu?.classList.remove('bcc-show');
+        persist();
+        runBrainComment('comment');
+        return;
+    }
+
     if (action === 'hide') {
         settings.activeAction = 'hide';
         settings.visible = false;
         settings.showPawWhenHidden = true;
         persist();
         petMenu?.classList.remove('bcc-show');
-        renderBubble('小黑猫钻进阴影里了。');
+        renderBubble('罗小黑钻进阴影里了。');
     }
 
     if (action === 'resetState') {
@@ -1041,7 +1278,7 @@ function showStatusBubble() {
         `精力 ${Math.round(settings.energy)}/100\n` +
         `亲密 ${Math.round(settings.affection)}/100\n` +
         `大小 ${Math.round((settings.scale ?? 1) * 100)}%`,
-        5200
+        12000
     );
 }
 
@@ -1055,7 +1292,7 @@ function resetPosition() {
     settings.showPawWhenHidden = false;
     persist();
     refreshAllUi();
-    renderBubble('小黑猫回到了聊天桌面中央。');
+    renderBubble('罗小黑回到了聊天桌面中央。');
 }
 
 function resetState() {
@@ -1067,8 +1304,284 @@ function resetState() {
     settings.effectUntil = 0;
     settings.activeAction = 'none';
     refreshAllUi();
-    renderBubble('小黑猫状态已重置。');
+    renderBubble('罗小黑状态已重置。');
 }
+
+
+function getRecentNarrativeEntries(count = 1) {
+    const context = getContext();
+    const chat = context?.chat || [];
+    const result = [];
+
+    if (Array.isArray(chat) && chat.length) {
+        for (let i = chat.length - 1; i >= 0 && result.length < count; i--) {
+            const msg = chat[i];
+            const raw = msg?.mes ?? msg?.message ?? '';
+            const text = cleanNarrativeText(raw);
+            if (!text || text.length < 4) continue;
+
+            const name = msg?.is_user
+                ? (context?.name1 || '你')
+                : (msg?.name || context?.name2 || '角色');
+
+            result.push({
+                index: i,
+                name: normalizeName(name) || (msg?.is_user ? '你' : '角色'),
+                isUser: !!msg?.is_user,
+                text,
+            });
+        }
+        return result.reverse();
+    }
+
+    const latest = getLatestAssistantEntry();
+    if (latest) {
+        return [{
+            index: latest.index ?? -1,
+            name: latest.name || '角色',
+            isUser: false,
+            text: latest.text,
+        }];
+    }
+
+    return [];
+}
+
+function buildNarrativePreview() {
+    const settings = getSettings();
+    const count = clamp(Number(settings.brainRange || 1), 1, 8);
+    const maxChars = clamp(Number(settings.brainMaxChars || 1500), 300, 5000);
+    const entries = getRecentNarrativeEntries(count);
+    const joined = entries
+        .map((item) => `${item.name}：${item.text}`)
+        .join('\n\n')
+        .slice(0, maxChars);
+
+    return {
+        entries,
+        text: joined,
+        source: entries.length ? 'getContext.chat / fallback DOM' : 'none',
+    };
+}
+
+function getBrainStyleInstruction(style) {
+    const map = {
+        cute: '你要像一只聪明、可爱、偏夸夸的小黑猫，点评要软一点，嘴甜但不要油腻。',
+        roast: '你要轻轻吐槽，语气可爱，可以有一点阴阳怪气，但不要刻薄，不要攻击用户。',
+        analysis: '你要做简短剧情解读，指出这一轮的动作、情绪或潜台词，语气清楚。',
+        companion: '你要像陪读的小猫，在旁边小声回应剧情，温柔、短句、有陪伴感。',
+    };
+    return map[style] || map.cute;
+}
+
+function buildBrainPrompt(task = 'comment') {
+    const settings = getSettings();
+    const preview = buildNarrativePreview();
+
+    if (!preview.text) {
+        return { prompt: '', preview };
+    }
+
+    const styleInstruction = getBrainStyleInstruction(settings.brainStyle);
+
+    const prompt = [
+        '你是酒馆网页里的桌宠“罗小黑”，不是聊天角色本人。',
+        '你只在自己的桌宠气泡里说话，不能续写剧情，不能替用户或角色行动。',
+        styleInstruction,
+        '请基于下面的剧情正文，输出一句 20 到 70 字的中文短评。',
+        '可以吐槽、夸夸、点出潜台词，但不要列清单，不要加引号，不要解释你在做什么。',
+        '',
+        '【剧情正文】',
+        preview.text,
+        '',
+        task === 'test' ? '请随便给一句测试回应，确认你能正常说话。' : '请点评当前剧情。'
+    ].join('\n');
+
+    return { prompt, preview };
+}
+
+function normalizeBrainText(text) {
+    return String(text ?? '')
+        .replace(/^\s*罗小黑[:：]\s*/i, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 180);
+}
+
+async function callCustomBrainApi(prompt) {
+    const settings = getSettings();
+    const url = String(settings.brainCustomApiUrl || '').trim();
+    const model = String(settings.brainCustomModel || '').trim();
+    const key = String(settings.brainCustomApiKey || '').trim();
+
+    if (!url) throw new Error('还没有填写独立 API 地址。');
+    if (!model) throw new Error('还没有填写独立 API 模型。');
+    if (!key) throw new Error('还没有填写独立 API Key。');
+
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${key}`,
+        },
+        body: JSON.stringify({
+            model,
+            messages: [
+                { role: 'system', content: '你是桌宠罗小黑，只输出一句简短中文气泡短评。' },
+                { role: 'user', content: prompt },
+            ],
+            temperature: clamp(Number(settings.brainTemperature || 0.8), 0, 2),
+            max_tokens: clamp(Number(settings.brainMaxTokens || 120), 40, 400),
+        }),
+    });
+
+    if (!response.ok) {
+        const detail = await response.text().catch(() => '');
+        throw new Error(`独立 API 请求失败：${response.status} ${detail.slice(0, 120)}`);
+    }
+
+    const data = await response.json();
+    const text = data?.choices?.[0]?.message?.content
+        ?? data?.choices?.[0]?.text
+        ?? data?.message?.content
+        ?? data?.content
+        ?? '';
+
+    if (!text) throw new Error('独立 API 没有返回文本。');
+    return normalizeBrainText(text);
+}
+
+async function callTavernBrainApi(prompt) {
+    const context = getContext();
+
+    if (typeof context?.generateQuietPrompt === 'function') {
+        const result = await context.generateQuietPrompt(prompt);
+        if (result) return normalizeBrainText(result);
+    }
+
+    if (typeof context?.generateRaw === 'function') {
+        const result = await context.generateRaw(prompt, '', false, false);
+        if (result) return normalizeBrainText(result);
+    }
+
+    if (typeof context?.generate === 'function') {
+        const result = await context.generate(prompt);
+        if (result) return normalizeBrainText(result);
+    }
+
+    throw new Error('当前酒馆环境没有暴露可直接调用的生成函数。');
+}
+
+async function callBrain(prompt, forcedProvider = null) {
+    const settings = getSettings();
+    const provider = forcedProvider || settings.brainProvider || 'tavern';
+
+    if (provider === 'custom') return callCustomBrainApi(prompt);
+    if (provider === 'tavern') return callTavernBrainApi(prompt);
+
+    if (provider === 'custom_then_tavern') {
+        try {
+            return await callCustomBrainApi(prompt);
+        } catch (err) {
+            console.warn(DEBUG_PREFIX + 'custom API failed, fallback to tavern API', err);
+            return callTavernBrainApi(prompt);
+        }
+    }
+
+    if (provider === 'tavern_then_custom') {
+        try {
+            return await callTavernBrainApi(prompt);
+        } catch (err) {
+            console.warn(DEBUG_PREFIX + 'tavern API failed, fallback to custom API', err);
+            return callCustomBrainApi(prompt);
+        }
+    }
+
+    return callTavernBrainApi(prompt);
+}
+
+function setBrainPreviewOutput(text, isError = false) {
+    const el = document.getElementById('black_cat_brain_preview_output');
+    if (!el) return;
+    el.textContent = text || '还没有剧情预览。';
+    el.style.color = isError ? '#b94a64' : '';
+}
+
+function previewBrainNarrative() {
+    const preview = buildNarrativePreview();
+
+    if (!preview.text) {
+        const msg = '罗小黑还没读到可以点评的正文。';
+        setBrainPreviewOutput(msg, true);
+        renderBubble(msg, 5200);
+        return;
+    }
+
+    const output = [
+        `读取来源：${preview.source}`,
+        `消息条数：${preview.entries.length}`,
+        `正文长度：${preview.text.length} 字`,
+        '',
+        preview.text,
+    ].join('\n');
+
+    setBrainPreviewOutput(output);
+    renderBubble('罗小黑已经把准备发送给 API 的剧情放到扩展菜单里了。', 5200);
+}
+
+async function runBrainComment(task = 'comment', forcedProvider = null) {
+    const settings = getSettings();
+    const { prompt, preview } = buildBrainPrompt(task);
+
+    if (!prompt || !preview.text) {
+        renderBubble('罗小黑趴在桌角：还没读到可以点评的正文。', 5200);
+        return;
+    }
+
+    if (settings.brainDebug && task === 'comment') {
+        const output = [
+            `读取来源：${preview.source}`,
+            `消息条数：${preview.entries.length}`,
+            `正文长度：${preview.text.length} 字`,
+            '',
+            preview.text,
+        ].join('\n');
+        setBrainPreviewOutput(output);
+        const short = preview.text.length > 260 ? `${preview.text.slice(0, 260)}…` : preview.text;
+        renderBubble(`调试预览已显示在扩展菜单。\n${short}`, 6500);
+    }
+
+    setTransientPose('talk', 2600);
+    refreshAllUi();
+    renderBubble('罗小黑正在看剧情……', 4500);
+
+    try {
+        const text = await callBrain(prompt, forcedProvider);
+        setTransientPose('happy', 2600);
+        renderBubble(text || '罗小黑眨了眨眼，但什么也没说。', 9000);
+    } catch (err) {
+        console.error(DEBUG_PREFIX + 'brain generation failed', err);
+        setTransientPose('alert', 2200);
+        renderBubble(`罗小黑连不上大脑：${err.message || err}`, 9000);
+    }
+
+    refreshAllUi();
+}
+
+async function testBrainProvider(forcedProvider) {
+    const prompt = '请用一句 20 字以内的中文告诉我：罗小黑大脑连接成功。';
+    setTransientPose('talk', 1800);
+    renderBubble('罗小黑正在测试连接……', 4200);
+
+    try {
+        const text = await callBrain(prompt, forcedProvider);
+        renderBubble(text || '罗小黑大脑连接成功。', 7000);
+    } catch (err) {
+        console.error(DEBUG_PREFIX + 'brain test failed', err);
+        renderBubble(`测试失败：${err.message || err}`, 9000);
+    }
+}
+
 
 function updateSettingsMenu() {
     const settings = getSettings();
@@ -1077,7 +1590,18 @@ function updateSettingsMenu() {
     $('#black_cat_menu_name').text(settings.name);
     $('#black_cat_menu_status').text(`${settings.visible ? '已显示' : '已隐藏'}｜大小${Math.round((settings.scale ?? 1) * 100)}%｜${getPoseText(settings)}`);
 
-    $('#black_cat_toggle').text(settings.visible ? '隐藏小黑猫' : '显示小黑猫');
+    $('#black_cat_toggle').text(settings.visible ? '隐藏罗小黑' : '显示罗小黑');
+
+    $('#black_cat_brain_provider').val(settings.brainProvider);
+    $('#black_cat_brain_style').val(settings.brainStyle);
+    $('#black_cat_brain_range').val(String(settings.brainRange));
+    $('#black_cat_brain_max_chars').val(settings.brainMaxChars);
+    $('#black_cat_brain_max_tokens').val(settings.brainMaxTokens);
+    $('#black_cat_brain_temperature').val(settings.brainTemperature);
+    $('#black_cat_custom_api_url').val(settings.brainCustomApiUrl);
+    $('#black_cat_custom_model').val(settings.brainCustomModel);
+    $('#black_cat_custom_api_key').val(settings.brainCustomApiKey);
+    $('#black_cat_brain_debug').prop('checked', !!settings.brainDebug);
 }
 
 function bindSettingsMenuEvents() {
@@ -1092,10 +1616,62 @@ function bindSettingsMenuEvents() {
         }
         persist();
         refreshAllUi();
-        if (settings.visible) renderBubble('喵。小黑猫出现了。');
+        if (settings.visible) renderBubble('喵。罗小黑出现了。');
     });
 
     $('#black_cat_reset_position').on('click', resetPosition);
+
+    $('#black_cat_brain_provider').on('change', (event) => {
+        const settings = getSettings();
+        settings.brainProvider = event.target.value;
+        persist();
+    });
+
+    $('#black_cat_brain_style').on('change', (event) => {
+        const settings = getSettings();
+        settings.brainStyle = event.target.value;
+        persist();
+    });
+
+    $('#black_cat_brain_range').on('change', (event) => {
+        const settings = getSettings();
+        settings.brainRange = Number(event.target.value) || 1;
+        persist();
+    });
+
+    $('#black_cat_brain_max_chars, #black_cat_brain_max_tokens, #black_cat_brain_temperature').on('change input', () => {
+        const settings = getSettings();
+        settings.brainMaxChars = clamp(Number($('#black_cat_brain_max_chars').val() || 1500), 300, 5000);
+        settings.brainMaxTokens = clamp(Number($('#black_cat_brain_max_tokens').val() || 120), 40, 400);
+        settings.brainTemperature = clamp(Number($('#black_cat_brain_temperature').val() || 0.8), 0, 2);
+        persist();
+    });
+
+    $('#black_cat_custom_api_url, #black_cat_custom_model, #black_cat_custom_api_key').on('change input', () => {
+        const settings = getSettings();
+        settings.brainCustomApiUrl = String($('#black_cat_custom_api_url').val() || '').trim();
+        settings.brainCustomModel = String($('#black_cat_custom_model').val() || '').trim();
+        settings.brainCustomApiKey = String($('#black_cat_custom_api_key').val() || '').trim();
+        persist();
+    });
+
+    $('#black_cat_brain_debug').on('change', (event) => {
+        const settings = getSettings();
+        settings.brainDebug = !!event.target.checked;
+        persist();
+    });
+
+    $('#black_cat_preview_story').on('click', previewBrainNarrative);
+    $('#black_cat_brain_comment').on('click', () => runBrainComment('comment'));
+    $('#black_cat_test_tavern_api').on('click', () => testBrainProvider('tavern'));
+    $('#black_cat_test_custom_api').on('click', () => testBrainProvider('custom'));
+    $('#black_cat_clear_custom_key').on('click', () => {
+        const settings = getSettings();
+        settings.brainCustomApiKey = '';
+        persist();
+        updateSettingsMenu();
+        renderBubble('罗小黑已经把独立 API Key 清空了。', 5200);
+    });
 
 }
 
@@ -1376,11 +1952,11 @@ function buildRoundComment(entry, force = false) {
     const actionCue = detectActionCue(focus, primary);
 
     const leads = [
-        '小黑猫托腮认真看完：',
-        '小黑猫歪头想了想：',
-        '小黑猫甩了甩尾巴，轻声说：',
-        '小黑猫小声咪了一下：',
-        '小黑猫抱着爪子点评：',
+        '罗小黑托腮认真看完：',
+        '罗小黑歪头想了想：',
+        '罗小黑甩了甩尾巴，轻声说：',
+        '罗小黑小声咪了一下：',
+        '罗小黑抱着爪子点评：',
     ];
 
     const cuteClosers = [
@@ -1433,7 +2009,7 @@ function commentOnLatestRound(force = false) {
 
     const entry = getLatestAssistantEntry();
     if (!entry) {
-        if (force) renderBubble('小黑猫趴在桌面上：还没看到能吐槽的正文内容呢。');
+        if (force) renderBubble('罗小黑趴在桌面上：还没看到能吐槽的正文内容呢。');
         return;
     }
 
@@ -1478,23 +2054,41 @@ async function appendSettingsWindow() {
             <div id="black_cat_settings">
                 <div class="inline-drawer">
                     <div class="inline-drawer-toggle inline-drawer-header">
-                        <b>小黑猫桌宠</b>
+                        <b>罗小黑桌宠</b>
                         <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                     </div>
                     <div class="inline-drawer-content">
                         <div class="bcc-lite-settings">
                             <div class="bcc-lite-row">
-                                <img id="black_cat_menu_preview" class="bcc-menu-preview" alt="小黑猫" draggable="false">
+                                <img id="black_cat_menu_preview" class="bcc-menu-preview" alt="罗小黑" draggable="false">
                                 <div>
-                                    <div id="black_cat_menu_name" class="bcc-menu-name">小黑</div>
+                                    <div id="black_cat_menu_name" class="bcc-menu-name">罗小黑</div>
                                     <div id="black_cat_menu_status" class="bcc-menu-status">它安静地趴着。</div>
                                 </div>
                             </div>
                             <div class="bcc-lite-controls">
-                                <div id="black_cat_toggle" class="menu_button">隐藏小黑猫</div>
+                                <div id="black_cat_toggle" class="menu_button">隐藏罗小黑</div>
                                 <div id="black_cat_reset_position" class="menu_button">复位到中央</div>
                             </div>
-                            <small class="bcc-lite-hint">这里只是控制入口。这版已把摸头和吃东西视频替换到对应互动动作；扩展菜单隐藏是完全隐藏，互动菜单隐藏会留下猫爪。</small>
+                            <small class="bcc-lite-hint">这里只是控制入口；扩展菜单隐藏是完全隐藏，互动菜单隐藏会留下猫爪。</small>
+
+                            <hr class="bcc-lite-sep">
+                            <div class="bcc-brain-settings">
+                                <div class="bcc-section-title">罗小黑大脑 v7.0 测试</div>
+                                <label class="bcc-field"><span>生成来源</span><select id="black_cat_brain_provider"><option value="tavern">使用酒馆当前 API</option><option value="custom">使用独立 API</option><option value="custom_then_tavern">优先独立 API，失败用酒馆 API</option><option value="tavern_then_custom">优先酒馆 API，失败用独立 API</option></select></label>
+                                <label class="bcc-field"><span>吐槽风格</span><select id="black_cat_brain_style"><option value="cute">可爱夸夸</option><option value="roast">轻度吐槽</option><option value="analysis">剧情解读</option><option value="companion">陪读小猫</option></select></label>
+                                <label class="bcc-field"><span>读取范围</span><select id="black_cat_brain_range"><option value="1">最后 1 条消息</option><option value="3">最近 3 条消息</option><option value="5">最近 5 条消息</option></select></label>
+                                <label class="bcc-field"><span>独立 API 地址</span><input id="black_cat_custom_api_url" type="text"></label>
+                                <label class="bcc-field"><span>独立 API 模型</span><input id="black_cat_custom_model" type="text"></label>
+                                <label class="bcc-field"><span>独立 API Key</span><input id="black_cat_custom_api_key" type="password"></label>
+                                <input id="black_cat_brain_max_chars" type="hidden" value="1500">
+                                <input id="black_cat_brain_max_tokens" type="hidden" value="120">
+                                <input id="black_cat_brain_temperature" type="hidden" value="0.8">
+                                <label class="bcc-check"><input id="black_cat_brain_debug" type="checkbox"><span>调试预览</span></label>
+                                <div class="bcc-lite-controls"><div id="black_cat_preview_story" class="menu_button">预览剧情</div><div id="black_cat_brain_comment" class="menu_button">吐槽当前剧情</div><div id="black_cat_test_tavern_api" class="menu_button">测试酒馆 API</div><div id="black_cat_test_custom_api" class="menu_button">测试独立 API</div><div id="black_cat_clear_custom_key" class="menu_button">清空 Key</div></div>
+                                <div id="black_cat_brain_preview_output" class="bcc-brain-preview-output">点击“预览剧情”后，罗小黑会把准备发送给 API 的剧情显示在这里。</div>
+                            </div>
+
                         </div>
                     </div>
                 </div>
@@ -1521,11 +2115,11 @@ jQuery(async () => {
         setTimeout(() => {
             const settings = getSettings();
             if (settings.visible) {
-                renderBubble('喵。小黑猫会待在聊天桌面上；点我互动，隐藏后可以拖动猫爪，也可以点猫爪叫我回来。');
+                renderBubble('喵。罗小黑会待在聊天桌面上；点我互动，隐藏后可以拖动猫爪，也可以点猫爪叫我回来。');
             }
         }, 700);
     } catch (err) {
         console.error(DEBUG_PREFIX + 'init failed', err);
-        toast('小黑猫桌宠初始化失败，请看浏览器控制台。');
+        toast('罗小黑桌宠初始化失败，请看浏览器控制台。');
     }
 });
