@@ -32,10 +32,10 @@
                     <label class="bcc-field">
                         <span>生成来源</span>
                         <select id="black_cat_brain_provider">
-                            <option value="tavern">使用酒馆当前 API</option>
+                            <option value="tavern">使用酒馆主 API</option>
                             <option value="custom">使用独立 API</option>
-                            <option value="custom_then_tavern">优先独立 API，失败用酒馆 API</option>
-                            <option value="tavern_then_custom">优先酒馆 API，失败用独立 API</option>
+                            <option value="custom_then_tavern">优先独立 API，失败用酒馆主 API</option>
+                            <option value="tavern_then_custom">优先酒馆主 API，失败用独立 API</option>
                         </select>
                     </label>
 
@@ -58,14 +58,27 @@
                         </select>
                     </label>
 
+                    <label class="bcc-field">
+                        <span>独立 API 附加上下文</span>
+                        <select id="black_cat_brain_context_mode">
+                            <option value="story">只读剧情</option>
+                            <option value="character">剧情 + 当前角色卡</option>
+                            <option value="character_world">剧情 + 当前角色卡 + 世界书状态</option>
+                        </select>
+                    </label>
+
+                    <div id="black_cat_brain_context_status" class="bcc-brain-context-status">
+                        上下文状态：尚未检测
+                    </div>
+
                     <div class="bcc-field-grid">
                         <label class="bcc-field">
                             <span>最大剧情字数</span>
-                            <input id="black_cat_brain_max_chars" type="number" min="300" max="4000" step="100">
+                            <input id="black_cat_brain_max_chars" type="text" inputmode="numeric" min="300" max="4000" step="100">
                         </label>
                         <label class="bcc-field">
                             <span>回复上限</span>
-                            <input id="black_cat_brain_max_tokens" type="number" min="40" max="400" step="10">
+                            <input id="black_cat_brain_max_tokens" type="text" inputmode="numeric" min="40" max="400" step="10">
                         </label>
                     </div>
 
@@ -105,8 +118,7 @@
 
                     <div class="bcc-lite-controls">
                         <div id="black_cat_preview_story" class="menu_button">预览剧情</div>
-                        <div id="black_cat_brain_comment" class="menu_button">吐槽当前剧情</div>
-                        <div id="black_cat_test_tavern_api" class="menu_button">测试酒馆 API</div>
+                        <div id="black_cat_test_tavern_api" class="menu_button">测试酒馆主 API</div>
                     </div>
 
                     <div id="black_cat_brain_preview_output" class="bcc-brain-preview-output">

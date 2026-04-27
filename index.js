@@ -6,7 +6,7 @@ export { MODULE_NAME };
 const MODULE_NAME = 'black_cat_companion';
 const DEBUG_PREFIX = '<BlackCatCompanion> ';
 const UPDATE_INTERVAL = 2000;
-const EXTENSION_VERSION = '0.7.1';
+const EXTENSION_VERSION = '0.7.9';
 
 const windowHtmlPath = new URL('./window.html', import.meta.url).href;
 
@@ -44,15 +44,18 @@ const defaultSettings = {
     brainCustomModel: '',
     brainCustomApiKey: '',
     brainDebug: true,
+    brainContextMode: 'character',
 };
 
-const persistedKeys = ['version', 'visible', 'showPawWhenHidden', 'name', 'x', 'y', 'scale', 'menuX', 'menuY', 'menuW', 'menuH', 'brainProvider', 'brainStyle', 'brainRange', 'brainMaxChars', 'brainMaxTokens', 'brainTemperature', 'brainCustomApiUrl', 'brainCustomModel', 'brainCustomApiKey', 'brainDebug'];
+const persistedKeys = ['version', 'visible', 'showPawWhenHidden', 'name', 'x', 'y', 'scale', 'menuX', 'menuY', 'menuW', 'menuH', 'brainProvider', 'brainStyle', 'brainRange', 'brainMaxChars', 'brainMaxTokens', 'brainTemperature', 'brainCustomApiUrl', 'brainCustomModel', 'brainCustomApiKey', 'brainDebug', 'brainContextMode'];
 let runtimeSettings = null;
 let initialized = false;
 let desktopRoot = null;
 let catButton = null;
 let pawButton = null;
 let catImage = null;
+let catAssetCurrent = '';
+let catAssetSwapTimer = null;
 let eyeLayer = null;
 let gazePupils = null;
 let catBadge = null;
@@ -145,6 +148,7 @@ function getSettings() {
     hydrated.brainCustomModel = stored.brainCustomModel ?? defaultSettings.brainCustomModel;
     hydrated.brainCustomApiKey = stored.brainCustomApiKey ?? defaultSettings.brainCustomApiKey;
     hydrated.brainDebug = stored.brainDebug ?? defaultSettings.brainDebug;
+    hydrated.brainContextMode = stored.brainContextMode ?? defaultSettings.brainContextMode;
     hydrated.lastTick = Date.now();
 
     runtimeSettings = hydrated;
@@ -220,10 +224,10 @@ function getResolvedPose(settings = getSettings()) {
 }
 
 function restartCatAnimation() {
+    // 不再 removeAttribute('src')。
+    // 之前每次互动 setTransientPose() 都会先清空可见 img 的 src，
+    // 浏览器就会短暂显示破图图标/alt 文本；这正是切换动作闪破图的源头。
     catAssetNonce += 1;
-    if (catImage) {
-        catImage.removeAttribute('src');
-    }
 }
 
 function setTransientPose(pose, duration = 2200) {
@@ -507,7 +511,7 @@ function createDesktopPet() {
     desktopRoot.id = 'bcc-desktop-root';
     desktopRoot.innerHTML = `
         <button id="bcc-cat-button" class="bcc-cat-button" type="button" title="">
-            <img id="bcc-cat-image" class="bcc-cat-image" alt="罗小黑" draggable="false">
+            <img id="bcc-cat-image" class="bcc-cat-image" alt="" draggable="false">
             <span id="bcc-eye-layer" class="bcc-eye-layer" aria-hidden="true">
                 <img id="bcc-gaze-pupils" class="bcc-gaze-pupils" alt="" draggable="false">
             </span>
@@ -918,6 +922,53 @@ function applyPawPosition() {
     pawButton.style.bottom = 'auto';
 }
 
+
+function setCatImageSmooth(displayAsset) {
+    if (!catImage) return;
+
+    catImage.alt = '';
+    catImage.decoding = 'async';
+
+    if (!catAssetCurrent) {
+        catAssetCurrent = displayAsset;
+        catImage.src = displayAsset;
+        return;
+    }
+
+    if (catAssetCurrent === displayAsset || catImage.getAttribute('src') === displayAsset) {
+        return;
+    }
+
+    clearTimeout(catAssetSwapTimer);
+
+    // 只在内存里预加载；新素材完成前旧素材一直留在可见 img 上。
+    // 不清空 src、不插入第二个可见 img、不加 cache-bust 查询参数。
+    const preload = new Image();
+    let applied = false;
+
+    const apply = () => {
+        if (applied) return;
+        applied = true;
+        catImage.alt = '';
+        catImage.decoding = 'async';
+        catImage.src = displayAsset;
+        catAssetCurrent = displayAsset;
+        catButton?.classList.remove('bcc-switching', 'bcc-cat-fade');
+    };
+
+    preload.onload = apply;
+    preload.onerror = () => {
+        console.warn(DEBUG_PREFIX + 'cat asset preload failed, keep previous asset:', displayAsset);
+        catButton?.classList.remove('bcc-switching', 'bcc-cat-fade');
+    };
+
+    preload.src = displayAsset;
+
+    if (preload.decode) {
+        preload.decode().then(apply).catch(() => {});
+    }
+}
+
 function updateDesktopPet() {
     createDesktopPet();
 
@@ -937,12 +988,9 @@ function updateDesktopPet() {
 
     catButton.title = '';
     catButton.classList.toggle('bcc-eye-follow', shouldEyeFollow);
-    const nextAsset = shouldEyeFollow ? getEyeBaseAssetPath() : getCatAssetPath(settings);
-    const displayAsset = `${nextAsset}${nextAsset.includes('?') ? '&' : '?'}bccv=${catAssetNonce}`;
-    if (catImage.getAttribute('src') !== displayAsset) {
-        catImage.src = displayAsset;
-    }
-    catImage.alt = settings.name;
+    const displayAsset = shouldEyeFollow ? getEyeBaseAssetPath() : getCatAssetPath(settings);
+    setCatImageSmooth(displayAsset);
+    catImage.alt = '';
     if (shouldEyeFollow) updateGazePupils();
 
     catBadge.textContent = '';
@@ -1374,6 +1422,124 @@ function getBrainStyleInstruction(style) {
     return map[style] || map.cute;
 }
 
+
+function getCurrentCharacterCardContext() {
+    const context = getContext();
+    const characters = context?.characters;
+    const id = context?.characterId ?? context?.character_id ?? context?.selectedCharacter;
+    let card = null;
+
+    if (Array.isArray(characters)) {
+        card = characters[id] || characters.find((item) => item?.avatar === context?.character?.avatar || item?.name === context?.name2);
+    } else if (characters && typeof characters === 'object') {
+        card = characters[id] || Object.values(characters).find((item) => item?.name === context?.name2);
+    }
+
+    card = card || context?.character || null;
+
+    const name = card?.name || context?.name2 || '';
+    const pieces = [];
+
+    const add = (label, value, limit = 700) => {
+        const text = cleanNarrativeText(value);
+        if (text) pieces.push(`${label}：${text.slice(0, limit)}`);
+    };
+
+    add('角色名', name, 80);
+    add('角色设定', card?.description || card?.desc || card?.data?.description);
+    add('性格', card?.personality || card?.data?.personality, 450);
+    add('场景', card?.scenario || card?.data?.scenario, 450);
+    add('示例对话', card?.mes_example || card?.data?.mes_example, 600);
+
+    return {
+        ok: !!(card || name),
+        name: name || '未检测到',
+        promptText: pieces.join('\n'),
+    };
+}
+
+function getWorldBookContextStatus() {
+    const context = getContext();
+    const candidates = [
+        context?.worldInfo,
+        context?.world_info,
+        context?.worldNames,
+        context?.world_names,
+        context?.chatMetadata?.world_info,
+        context?.chat_metadata?.world_info,
+        context?.activatedWorldInfo,
+        context?.activated_world_info,
+    ].filter(Boolean);
+
+    let detected = false;
+    let count = 0;
+
+    for (const item of candidates) {
+        if (Array.isArray(item)) {
+            detected = detected || item.length > 0;
+            count += item.length;
+        } else if (typeof item === 'object') {
+            const keys = Object.keys(item);
+            detected = detected || keys.length > 0;
+            count += keys.length;
+        } else if (String(item).trim()) {
+            detected = true;
+            count += 1;
+        }
+    }
+
+    return { detected, count };
+}
+
+function getBrainContextInfo() {
+    const settings = getSettings();
+    const provider = settings.brainProvider || 'tavern';
+    const charInfo = getCurrentCharacterCardContext();
+    const world = getWorldBookContextStatus();
+
+    const tavernProvider = provider === 'tavern' || provider === 'tavern_then_custom';
+    const customProvider = provider === 'custom' || provider === 'custom_then_tavern';
+
+    const providerLabelMap = {
+        tavern: '酒馆主API',
+        custom: '独立API',
+        custom_then_tavern: '优先独立API，失败用酒馆主API',
+        tavern_then_custom: '优先酒馆主API，失败用独立API',
+    };
+    const lines = [];
+    lines.push(`API来源：${providerLabelMap[provider] || provider}`);
+    lines.push(`角色卡：${charInfo.ok ? `已检测：${charInfo.name}` : '未检测到当前角色卡'}`);
+
+    if (tavernProvider && !customProvider) {
+        lines.push('世界书：交由酒馆主API上下文处理');
+    } else if (world.detected) {
+        lines.push(`世界书：已检测到相关状态${world.count ? `（${world.count} 项）` : ''}`);
+    } else {
+        lines.push('世界书：未检测到可直接读取的状态；酒馆主API 模式会由酒馆自行处理');
+    }
+
+    let promptText = '';
+    if (customProvider && settings.brainContextMode !== 'story' && charInfo.ok && charInfo.promptText) {
+        promptText += `【当前角色卡摘要】\n${charInfo.promptText}\n`;
+    }
+
+    if (customProvider && settings.brainContextMode === 'character_world') {
+        promptText += `【世界书状态】\n${world.detected ? '插件检测到世界书/相关状态，但不展开原文。' : '插件未检测到可直接读取的世界书条目。'}\n`;
+    }
+
+    return { statusText: lines.join('\n'), promptText };
+}
+
+function getBrainContextStatusText() {
+    try {
+        return getBrainContextInfo().statusText;
+    } catch (err) {
+        console.warn(DEBUG_PREFIX + 'context status failed', err);
+        return '上下文状态：检测失败';
+    }
+}
+
+
 function buildBrainPrompt(task = 'comment') {
     const settings = getSettings();
     const preview = buildNarrativePreview();
@@ -1383,11 +1549,13 @@ function buildBrainPrompt(task = 'comment') {
     }
 
     const styleInstruction = getBrainStyleInstruction(settings.brainStyle);
+    const contextInfo = getBrainContextInfo();
 
     const prompt = [
         '你是酒馆网页里的桌宠“罗小黑”，不是聊天角色本人。',
         '你只在自己的桌宠气泡里说话，不能续写剧情，不能替用户或角色行动。',
         styleInstruction,
+        contextInfo.promptText ? `【附加设定摘要】\n${contextInfo.promptText}` : '',
         '请基于下面的剧情正文，输出一句 20 到 70 字的中文短评。',
         '可以吐槽、夸夸、点出潜台词，但不要列清单，不要加引号，不要解释你在做什么。',
         '',
@@ -1397,7 +1565,7 @@ function buildBrainPrompt(task = 'comment') {
         task === 'test' ? '请随便给一句测试回应，确认你能正常说话。' : '请点评当前剧情。'
     ].join('\n');
 
-    return { prompt, preview };
+    return { prompt, preview, contextInfo };
 }
 
 function normalizeBrainText(text) {
@@ -1414,9 +1582,9 @@ async function callCustomBrainApi(prompt) {
     const model = String(settings.brainCustomModel || '').trim();
     const key = String(settings.brainCustomApiKey || '').trim();
 
-    if (!url) throw new Error('还没有填写独立 API 地址。');
-    if (!model) throw new Error('还没有填写独立 API 模型。');
-    if (!key) throw new Error('还没有填写独立 API Key。');
+    if (!url) throw new Error('还没有填写独立API 地址。');
+    if (!model) throw new Error('还没有填写独立API 模型。');
+    if (!key) throw new Error('还没有填写独立API Key。');
 
     const response = await fetch(url, {
         method: 'POST',
@@ -1437,7 +1605,7 @@ async function callCustomBrainApi(prompt) {
 
     if (!response.ok) {
         const detail = await response.text().catch(() => '');
-        throw new Error(`独立 API 请求失败：${response.status} ${detail.slice(0, 120)}`);
+        throw new Error(`独立API 请求失败：${response.status} ${detail.slice(0, 120)}`);
     }
 
     const data = await response.json();
@@ -1447,7 +1615,7 @@ async function callCustomBrainApi(prompt) {
         ?? data?.content
         ?? '';
 
-    if (!text) throw new Error('独立 API 没有返回文本。');
+    if (!text) throw new Error('独立API 没有返回文本。');
     return normalizeBrainText(text);
 }
 
@@ -1517,11 +1685,16 @@ function previewBrainNarrative() {
         return;
     }
 
+    const contextInfo = getBrainContextInfo();
     const output = [
         `读取来源：${preview.source}`,
         `消息条数：${preview.entries.length}`,
         `正文长度：${preview.text.length} 字`,
         '',
+        '【上下文状态】',
+        contextInfo.statusText,
+        '',
+        '【剧情正文】',
         preview.text,
     ].join('\n');
 
@@ -1539,11 +1712,16 @@ async function runBrainComment(task = 'comment', forcedProvider = null) {
     }
 
     if (settings.brainDebug && task === 'comment') {
+        const contextInfo = getBrainContextInfo();
         const output = [
             `读取来源：${preview.source}`,
             `消息条数：${preview.entries.length}`,
             `正文长度：${preview.text.length} 字`,
             '',
+            '【上下文状态】',
+            contextInfo.statusText,
+            '',
+            '【剧情正文】',
             preview.text,
         ].join('\n');
         setBrainPreviewOutput(output);
@@ -1583,6 +1761,14 @@ async function testBrainProvider(forcedProvider) {
 }
 
 
+
+function setInputValueIfNotFocused(selector, value) {
+    const el = document.querySelector(selector);
+    if (!el) return;
+    if (document.activeElement === el) return;
+    $(selector).val(value);
+}
+
 function updateSettingsMenu() {
     const settings = getSettings();
 
@@ -1595,13 +1781,15 @@ function updateSettingsMenu() {
     $('#black_cat_brain_provider').val(settings.brainProvider);
     $('#black_cat_brain_style').val(settings.brainStyle);
     $('#black_cat_brain_range').val(String(settings.brainRange));
-    $('#black_cat_brain_max_chars').val(settings.brainMaxChars);
-    $('#black_cat_brain_max_tokens').val(settings.brainMaxTokens);
-    $('#black_cat_brain_temperature').val(settings.brainTemperature);
-    $('#black_cat_custom_api_url').val(settings.brainCustomApiUrl);
-    $('#black_cat_custom_model').val(settings.brainCustomModel);
-    $('#black_cat_custom_api_key').val(settings.brainCustomApiKey);
+    $('#black_cat_brain_context_mode').val(settings.brainContextMode);
+    setInputValueIfNotFocused('#black_cat_brain_max_chars', settings.brainMaxChars);
+    setInputValueIfNotFocused('#black_cat_brain_max_tokens', settings.brainMaxTokens);
+    setInputValueIfNotFocused('#black_cat_brain_temperature', settings.brainTemperature);
+    setInputValueIfNotFocused('#black_cat_custom_api_url', settings.brainCustomApiUrl);
+    setInputValueIfNotFocused('#black_cat_custom_model', settings.brainCustomModel);
+    setInputValueIfNotFocused('#black_cat_custom_api_key', settings.brainCustomApiKey);
     $('#black_cat_brain_debug').prop('checked', !!settings.brainDebug);
+    $('#black_cat_brain_context_status').text(getBrainContextStatusText());
 }
 
 function bindSettingsMenuEvents() {
@@ -1637,6 +1825,14 @@ function bindSettingsMenuEvents() {
         const settings = getSettings();
         settings.brainRange = Number(event.target.value) || 1;
         persist();
+        updateSettingsMenu();
+    });
+
+    $('#black_cat_brain_context_mode').on('change', (event) => {
+        const settings = getSettings();
+        settings.brainContextMode = event.target.value || 'character';
+        persist();
+        updateSettingsMenu();
     });
 
     $('#black_cat_brain_max_chars, #black_cat_brain_max_tokens, #black_cat_brain_temperature').on('change input', () => {
@@ -1662,7 +1858,6 @@ function bindSettingsMenuEvents() {
     });
 
     $('#black_cat_preview_story').on('click', previewBrainNarrative);
-    $('#black_cat_brain_comment').on('click', () => runBrainComment('comment'));
     $('#black_cat_test_tavern_api').on('click', () => testBrainProvider('tavern'));
     $('#black_cat_test_custom_api').on('click', () => testBrainProvider('custom'));
     $('#black_cat_clear_custom_key').on('click', () => {
@@ -1670,7 +1865,7 @@ function bindSettingsMenuEvents() {
         settings.brainCustomApiKey = '';
         persist();
         updateSettingsMenu();
-        renderBubble('罗小黑已经把独立 API Key 清空了。', 5200);
+        renderBubble('罗小黑已经把独立API Key 清空了。', 5200);
     });
 
 }
@@ -2060,7 +2255,7 @@ async function appendSettingsWindow() {
                     <div class="inline-drawer-content">
                         <div class="bcc-lite-settings">
                             <div class="bcc-lite-row">
-                                <img id="black_cat_menu_preview" class="bcc-menu-preview" alt="罗小黑" draggable="false">
+                                <img id="black_cat_menu_preview" class="bcc-menu-preview" alt="" draggable="false">
                                 <div>
                                     <div id="black_cat_menu_name" class="bcc-menu-name">罗小黑</div>
                                     <div id="black_cat_menu_status" class="bcc-menu-status">它安静地趴着。</div>
@@ -2075,17 +2270,17 @@ async function appendSettingsWindow() {
                             <hr class="bcc-lite-sep">
                             <div class="bcc-brain-settings">
                                 <div class="bcc-section-title">罗小黑大脑 v7.0 测试</div>
-                                <label class="bcc-field"><span>生成来源</span><select id="black_cat_brain_provider"><option value="tavern">使用酒馆当前 API</option><option value="custom">使用独立 API</option><option value="custom_then_tavern">优先独立 API，失败用酒馆 API</option><option value="tavern_then_custom">优先酒馆 API，失败用独立 API</option></select></label>
+                                <label class="bcc-field"><span>生成来源</span><select id="black_cat_brain_provider"><option value="tavern">使用酒馆主API</option><option value="custom">使用独立API</option><option value="custom_then_tavern">优先独立API，失败用酒馆主API</option><option value="tavern_then_custom">优先酒馆主API，失败用独立API</option></select></label>
                                 <label class="bcc-field"><span>吐槽风格</span><select id="black_cat_brain_style"><option value="cute">可爱夸夸</option><option value="roast">轻度吐槽</option><option value="analysis">剧情解读</option><option value="companion">陪读小猫</option></select></label>
                                 <label class="bcc-field"><span>读取范围</span><select id="black_cat_brain_range"><option value="1">最后 1 条消息</option><option value="3">最近 3 条消息</option><option value="5">最近 5 条消息</option></select></label>
-                                <label class="bcc-field"><span>独立 API 地址</span><input id="black_cat_custom_api_url" type="text"></label>
-                                <label class="bcc-field"><span>独立 API 模型</span><input id="black_cat_custom_model" type="text"></label>
-                                <label class="bcc-field"><span>独立 API Key</span><input id="black_cat_custom_api_key" type="password"></label>
+                                <label class="bcc-field"><span>独立API 地址</span><input id="black_cat_custom_api_url" type="text"></label>
+                                <label class="bcc-field"><span>独立API 模型</span><input id="black_cat_custom_model" type="text"></label>
+                                <label class="bcc-field"><span>独立API Key</span><input id="black_cat_custom_api_key" type="password"></label>
                                 <input id="black_cat_brain_max_chars" type="hidden" value="1500">
                                 <input id="black_cat_brain_max_tokens" type="hidden" value="120">
                                 <input id="black_cat_brain_temperature" type="hidden" value="0.8">
                                 <label class="bcc-check"><input id="black_cat_brain_debug" type="checkbox"><span>调试预览</span></label>
-                                <div class="bcc-lite-controls"><div id="black_cat_preview_story" class="menu_button">预览剧情</div><div id="black_cat_brain_comment" class="menu_button">吐槽当前剧情</div><div id="black_cat_test_tavern_api" class="menu_button">测试酒馆 API</div><div id="black_cat_test_custom_api" class="menu_button">测试独立 API</div><div id="black_cat_clear_custom_key" class="menu_button">清空 Key</div></div>
+                                <div class="bcc-lite-controls"><div id="black_cat_preview_story" class="menu_button">预览剧情</div><div id="black_cat_test_tavern_api" class="menu_button">测试酒馆主API</div><div id="black_cat_test_custom_api" class="menu_button">测试独立API</div><div id="black_cat_clear_custom_key" class="menu_button">清空 Key</div></div>
                                 <div id="black_cat_brain_preview_output" class="bcc-brain-preview-output">点击“预览剧情”后，罗小黑会把准备发送给 API 的剧情显示在这里。</div>
                             </div>
 

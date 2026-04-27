@@ -737,3 +737,119 @@
     line-height: 1.45;
     opacity: .92;
 }
+
+
+/* v7.2：手机端扩展菜单按钮改为网格，节省纵向空间 */
+.bcc-lite-controls {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    align-items: stretch;
+}
+
+.bcc-lite-controls .menu_button {
+    width: auto !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    text-align: center;
+    white-space: normal;
+    line-height: 1.25;
+    padding: 8px 9px;
+    box-sizing: border-box;
+}
+
+@media (min-width: 760px) {
+    .bcc-lite-controls {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+.bcc-brain-context-status {
+    border: 1px solid rgba(120, 90, 105, .16);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, .52);
+    padding: 8px 10px;
+    font-size: 12px;
+    line-height: 1.45;
+    white-space: pre-line;
+}
+
+/* v7.2：双图层切换，减少 WebP 换动作时闪烁 */
+.bcc-cat-button {
+    position: fixed;
+}
+
+.bcc-cat-image {
+    opacity: 1;
+    transition: opacity .16s ease;
+}
+
+.bcc-cat-image-next {
+    position: absolute !important;
+    left: 50%;
+    top: 50%;
+    width: 124px;
+    height: 124px;
+    object-fit: contain;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-drag: none;
+    transform: translate(-50%, -50%);
+    opacity: 0;
+    z-index: 2;
+    filter: drop-shadow(0 10px 16px rgba(0, 0, 0, 0.18));
+    transition: opacity .16s ease;
+}
+
+.bcc-cat-button.bcc-switching .bcc-cat-image {
+    opacity: 0;
+}
+
+.bcc-cat-button.bcc-switching .bcc-cat-image-next {
+    opacity: 1;
+}
+
+
+/* v7.3：关闭可见的 next 图层，避免动作切换时闪出破图/旧图层 */
+.bcc-cat-image-next {
+    display: none !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+}
+.bcc-cat-button.bcc-switching .bcc-cat-image {
+    opacity: 1 !important;
+}
+
+
+/* v7.4：完全移除可见切换层，旧动作保留到新动作加载完成，不再闪破图 */
+.bcc-cat-image-next {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    width: 0 !important;
+    height: 0 !important;
+}
+.bcc-cat-image,
+.bcc-cat-button.bcc-switching .bcc-cat-image,
+.bcc-cat-image.bcc-cat-fade {
+    opacity: 1 !important;
+    transition: none !important;
+}
+
+
+/* v7.6：最终修复动作切换破图闪烁 */
+.bcc-cat-image {
+    opacity: 1 !important;
+}
+.bcc-cat-image-next,
+.bcc-cat-image-next-removed {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    width: 0 !important;
+    height: 0 !important;
+}
+.bcc-cat-button.bcc-switching .bcc-cat-image,
+.bcc-cat-image.bcc-cat-fade {
+    opacity: 1 !important;
+}
