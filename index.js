@@ -6,7 +6,7 @@ export { MODULE_NAME };
 const MODULE_NAME = 'black_cat_companion';
 const DEBUG_PREFIX = '<BlackCatCompanion> ';
 const UPDATE_INTERVAL = 2000;
-const EXTENSION_VERSION = '0.8.1';
+const EXTENSION_VERSION = '0.8.3';
 
 const windowHtmlPath = new URL('./window.html', import.meta.url).href;
 
@@ -247,6 +247,7 @@ function getCatAssetPath(settings = getSettings()) {
     if (pose === 'happy') return assetPath('cat-happy.webp');
     if (pose === 'talk') return assetPath('cat-talk.webp');
     if (pose === 'play') return assetPath('cat-play.webp');
+    if (pose === 'read') return assetPath('cat-read.webp');
     if (pose === 'loaf') return assetPath('cat-loaf.webp');
     return assetPath('cat-sit.webp');
 }
@@ -271,8 +272,13 @@ function getQualityModeHint(mode = getSettings().qualityMode) {
 const preloadedCatAssets = new Set();
 
 function preloadCatAssets() {
-    // v8.1：高清模式不再一次性预加载全部 animated WebP。
-    // 新动作仍由 setCatImageSmooth() 在切换前进行单个素材预加载。
+    const sleepAsset = assetPath('cat-sleep.webp');
+    if (!preloadedCatAssets.has(sleepAsset)) {
+        const image = new Image();
+        image.decoding = 'async';
+        image.src = sleepAsset;
+        preloadedCatAssets.add(sleepAsset);
+    }
 }
 
 function applyQualityMode() {
@@ -295,6 +301,7 @@ function getPoseText(settings = getSettings()) {
     if (pose === 'happy') return '开心';
     if (pose === 'talk') return '吐槽中';
     if (pose === 'play') return '玩耍';
+    if (pose === 'read') return '看剧情';
     if (pose === 'loaf') return '趴着';
     return '坐着';
 }
@@ -305,7 +312,7 @@ function getMoodText(settings = getSettings()) {
     if (settings.hunger < 25) return '它有点饿，正眼巴巴盯着你。';
     if (settings.energy < 25) return '它有点困，耳朵都懒得立太高。';
     if (pose === 'alert') return '它竖起耳朵盯着聊天内容，像是发现了什么。';
-    if (pose === 'talk') return '它正准备开麦吐槽，嘴都张开了。';
+    if (pose === 'talk') return '它正准备开麦，嘴都张开了。';
     if (pose === 'play') return '它爪子都举起来了，像一小团要扑出去的黑影。';
     if (pose === 'happy') return '它眯着眼蹭蹭你，明显心情很好。';
     if (pose === 'loaf') return '它乖乖趴着，像一小团黑影窝在酒馆角落。';
@@ -963,7 +970,13 @@ function applyPawPosition() {
 }
 
 
-function setCatImageSmooth(displayAsset) {
+function applyCatPoseClass(visualPose) {
+    if (!catButton) return;
+    catButton.classList.remove('bcc-pose-sit', 'bcc-pose-alert', 'bcc-pose-sleep', 'bcc-pose-happy', 'bcc-pose-talk', 'bcc-pose-play', 'bcc-pose-read', 'bcc-pose-loaf');
+    catButton.classList.add(`bcc-pose-${visualPose}`);
+}
+
+function setCatImageSmooth(displayAsset, visualPose = null) {
     if (!catImage) return;
 
     catImage.alt = '';
@@ -972,10 +985,12 @@ function setCatImageSmooth(displayAsset) {
     if (!catAssetCurrent) {
         catAssetCurrent = displayAsset;
         catImage.src = displayAsset;
+        if (visualPose) applyCatPoseClass(visualPose);
         return;
     }
 
     if (catAssetCurrent === displayAsset || catImage.getAttribute('src') === displayAsset) {
+        if (visualPose) applyCatPoseClass(visualPose);
         return;
     }
 
@@ -993,6 +1008,7 @@ function setCatImageSmooth(displayAsset) {
         catImage.decoding = 'async';
         catImage.src = displayAsset;
         catAssetCurrent = displayAsset;
+        if (visualPose) applyCatPoseClass(visualPose);
         catButton?.classList.remove('bcc-switching', 'bcc-cat-fade');
     };
 
@@ -1028,14 +1044,12 @@ function updateDesktopPet() {
     pawButton?.classList.toggle('bcc-hidden', shouldShow || !settings.showPawWhenHidden);
     const shouldEyeFollow = eyeFollowActive;
     const visualPose = shouldEyeFollow ? 'sit' : pose;
-    catButton.classList.remove('bcc-pose-sit', 'bcc-pose-alert', 'bcc-pose-sleep', 'bcc-pose-happy', 'bcc-pose-talk', 'bcc-pose-play', 'bcc-pose-loaf');
-    catButton.classList.add(`bcc-pose-${visualPose}`);
     catButton.classList.toggle('bcc-hungry', settings.hunger < 30);
 
     catButton.title = '';
     catButton.classList.toggle('bcc-eye-follow', shouldEyeFollow);
     const displayAsset = shouldEyeFollow ? getEyeBaseAssetPath() : getCatAssetPath(settings);
-    setCatImageSmooth(displayAsset);
+    setCatImageSmooth(displayAsset, visualPose);
     catImage.alt = '';
     if (shouldEyeFollow) updateGazePupils();
 
@@ -1775,9 +1789,9 @@ async function runBrainComment(task = 'comment', forcedProvider = null) {
         renderBubble(`调试预览已显示在扩展菜单。\n${short}`, 6500);
     }
 
-    setTransientPose('talk', 2600);
+    setTransientPose('read', 6500);
     refreshAllUi();
-    renderBubble('罗小黑正在看剧情……', 4500);
+    renderBubble('罗小黑正在翻小书看剧情……', 4500);
 
     try {
         const text = await callBrain(prompt, forcedProvider);
@@ -2370,6 +2384,7 @@ jQuery(async () => {
         await appendSettingsWindow();
         getSettings();
         createDesktopPet();
+        preloadCatAssets();
         bindSettingsMenuEvents();
         refreshAllUi();
 

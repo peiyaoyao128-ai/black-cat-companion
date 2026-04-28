@@ -931,3 +931,31 @@
 #bcc-desktop-root.bcc-quality-power .bcc-cat-image {
     will-change: auto;
 }
+
+
+/* v8.3：罗小黑看剧情/看书动作 */
+.bcc-cat-button.bcc-pose-read .bcc-cat-image {
+    animation: none !important;
+}
+
+/* Sleep asset has more built-in empty space; enlarge display only. */
+.bcc-cat-button.bcc-pose-sleep .bcc-cat-image {
+    width: 154px !important;
+    height: 154px !important;
+}
+
+.bcc-cat-button.bcc-pose-loaf .bcc-cat-image {
+    width: 134px !important;
+    height: 134px !important;
+}
+
+.bcc-cat-button.bcc-pose-play .bcc-cat-image {
+    width: 144px !important;
+    height: 144px !important;
+}
+
+.bcc-cat-button.bcc-pose-happy .bcc-cat-image {
+    width: 134px !important;
+    height: 134px !important;
+}
+
