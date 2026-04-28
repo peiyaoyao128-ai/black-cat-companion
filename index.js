@@ -6,7 +6,7 @@ export { MODULE_NAME };
 const MODULE_NAME = 'black_cat_companion';
 const DEBUG_PREFIX = '<BlackCatCompanion> ';
 const UPDATE_INTERVAL = 2000;
-const EXTENSION_VERSION = '0.7.9';
+const EXTENSION_VERSION = '0.8.0';
 
 const windowHtmlPath = new URL('./window.html', import.meta.url).href;
 
@@ -45,9 +45,10 @@ const defaultSettings = {
     brainCustomApiKey: '',
     brainDebug: true,
     brainContextMode: 'character',
+    qualityMode: 'high',
 };
 
-const persistedKeys = ['version', 'visible', 'showPawWhenHidden', 'name', 'x', 'y', 'scale', 'menuX', 'menuY', 'menuW', 'menuH', 'brainProvider', 'brainStyle', 'brainRange', 'brainMaxChars', 'brainMaxTokens', 'brainTemperature', 'brainCustomApiUrl', 'brainCustomModel', 'brainCustomApiKey', 'brainDebug', 'brainContextMode'];
+const persistedKeys = ['version', 'visible', 'showPawWhenHidden', 'name', 'x', 'y', 'scale', 'menuX', 'menuY', 'menuW', 'menuH', 'brainProvider', 'brainStyle', 'brainRange', 'brainMaxChars', 'brainMaxTokens', 'brainTemperature', 'brainCustomApiUrl', 'brainCustomModel', 'brainCustomApiKey', 'brainDebug', 'brainContextMode', 'qualityMode'];
 let runtimeSettings = null;
 let initialized = false;
 let desktopRoot = null;
@@ -149,6 +150,7 @@ function getSettings() {
     hydrated.brainCustomApiKey = stored.brainCustomApiKey ?? defaultSettings.brainCustomApiKey;
     hydrated.brainDebug = stored.brainDebug ?? defaultSettings.brainDebug;
     hydrated.brainContextMode = stored.brainContextMode ?? defaultSettings.brainContextMode;
+    hydrated.qualityMode = stored.qualityMode ?? defaultSettings.qualityMode;
     hydrated.lastTick = Date.now();
 
     runtimeSettings = hydrated;
@@ -247,6 +249,63 @@ function getCatAssetPath(settings = getSettings()) {
     if (pose === 'loaf') return assetPath('cat-loaf.webp');
     return assetPath('cat-sit.webp');
 }
+
+
+function getQualityModeLabel(mode = getSettings().qualityMode) {
+    if (mode === 'balanced') return '平衡模式';
+    if (mode === 'power') return '省电模式';
+    return '高清模式';
+}
+
+function getQualityModeHint(mode = getSettings().qualityMode) {
+    if (mode === 'balanced') {
+        return '当前：平衡模式。保留动态素材入口，后续可接入平衡转码素材。';
+    }
+    if (mode === 'power') {
+        return '当前：省电模式。保留动态素材入口，后续可接入省电播放策略。';
+    }
+    return '当前：高清模式。使用高清动态素材，并提前预加载常用动作。';
+}
+
+const preloadedCatAssets = new Set();
+
+function preloadCatAssets() {
+    const assetNames = [
+        'cat-sit.webp',
+        'cat-alert.webp',
+        'cat-sleep.webp',
+        'cat-happy.webp',
+        'cat-talk.webp',
+        'cat-play.webp',
+        'cat-loaf.webp',
+        'cat-sit-eyebase.webp',
+        'gaze-pupils.png',
+    ];
+
+    for (const name of assetNames) {
+        const url = assetPath(name);
+        if (preloadedCatAssets.has(url)) continue;
+        preloadedCatAssets.add(url);
+
+        const img = new Image();
+        img.decoding = 'async';
+        img.src = url;
+        if (img.decode) img.decode().catch(() => {});
+    }
+}
+
+function applyQualityMode() {
+    const settings = getSettings();
+    const mode = settings.qualityMode || 'high';
+
+    desktopRoot?.classList.remove('bcc-quality-high', 'bcc-quality-balanced', 'bcc-quality-power');
+    desktopRoot?.classList.add(`bcc-quality-${mode}`);
+
+    if (mode === 'high') {
+        preloadCatAssets();
+    }
+}
+
 
 function getPoseText(settings = getSettings()) {
     const pose = getResolvedPose(settings);
@@ -976,6 +1035,8 @@ function updateDesktopPet() {
     const pose = getResolvedPose(settings);
 
     if (!catButton || !catImage || !catBadge) return;
+
+    applyQualityMode();
 
     const shouldShow = settings.visible;
     catButton.classList.toggle('bcc-hidden', !shouldShow);
@@ -1774,9 +1835,13 @@ function updateSettingsMenu() {
 
     $('#black_cat_menu_preview').attr('src', getCatAssetPath(settings));
     $('#black_cat_menu_name').text(settings.name);
-    $('#black_cat_menu_status').text(`${settings.visible ? '已显示' : '已隐藏'}｜大小${Math.round((settings.scale ?? 1) * 100)}%｜${getPoseText(settings)}`);
+    $('#black_cat_menu_status').text(`${settings.visible ? '已显示' : '已隐藏'}｜大小${Math.round((settings.scale ?? 1) * 100)}%｜${getPoseText(settings)}｜${getQualityModeLabel(settings.qualityMode)}`);
 
     $('#black_cat_toggle').text(settings.visible ? '隐藏罗小黑' : '显示罗小黑');
+
+    $('.bcc-quality-btn').removeClass('bcc-active');
+    $(`.bcc-quality-btn[data-bcc-quality="${settings.qualityMode || 'high'}"]`).addClass('bcc-active');
+    $('#black_cat_quality_hint').text(getQualityModeHint(settings.qualityMode || 'high'));
 
     $('#black_cat_brain_provider').val(settings.brainProvider);
     $('#black_cat_brain_style').val(settings.brainStyle);
@@ -1808,6 +1873,16 @@ function bindSettingsMenuEvents() {
     });
 
     $('#black_cat_reset_position').on('click', resetPosition);
+
+    $('.bcc-quality-btn').on('click', (event) => {
+        const mode = event.currentTarget?.dataset?.bccQuality || 'high';
+        const settings = getSettings();
+        settings.qualityMode = mode;
+        persist();
+        applyQualityMode();
+        updateSettingsMenu();
+        renderBubble(`罗小黑画质已切换为：${getQualityModeLabel(mode)}`, 4200);
+    });
 
     $('#black_cat_brain_provider').on('change', (event) => {
         const settings = getSettings();
@@ -2265,7 +2340,17 @@ async function appendSettingsWindow() {
                                 <div id="black_cat_toggle" class="menu_button">隐藏罗小黑</div>
                                 <div id="black_cat_reset_position" class="menu_button">复位到中央</div>
                             </div>
-                            <small class="bcc-lite-hint">这里只是控制入口；扩展菜单隐藏是完全隐藏，互动菜单隐藏会留下猫爪。</small>
+                            
+                                <div class="bcc-quality-panel">
+                                    <div class="bcc-section-title bcc-quality-title">罗小黑画质</div>
+                                    <div class="bcc-quality-buttons">
+                                        <div id="black_cat_quality_high" class="menu_button bcc-quality-btn" data-bcc-quality="high">高清模式</div>
+                                        <div id="black_cat_quality_balanced" class="menu_button bcc-quality-btn" data-bcc-quality="balanced">平衡模式</div>
+                                        <div id="black_cat_quality_power" class="menu_button bcc-quality-btn" data-bcc-quality="power">省电模式</div>
+                                    </div>
+                                    <small id="black_cat_quality_hint" class="bcc-lite-hint bcc-quality-hint">当前：高清模式。使用高清动态素材，并提前预加载常用动作。</small>
+                                </div>
+<small class="bcc-lite-hint">这里只是控制入口；扩展菜单隐藏是完全隐藏，互动菜单隐藏会留下猫爪。</small>
 
                             <hr class="bcc-lite-sep">
                             <div class="bcc-brain-settings">

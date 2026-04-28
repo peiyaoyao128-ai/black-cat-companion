@@ -853,3 +853,55 @@
 .bcc-cat-image.bcc-cat-fade {
     opacity: 1 !important;
 }
+
+
+/* v8.0：罗小黑画质模式按钮 */
+.bcc-quality-panel {
+    margin-top: 12px;
+    padding: 10px;
+    border: 1px solid rgba(120, 90, 105, .14);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, .38);
+}
+
+.bcc-quality-title {
+    margin: 0 0 8px;
+}
+
+.bcc-quality-buttons {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
+}
+
+.bcc-quality-btn {
+    min-height: 32px;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    margin: 0 !important;
+    white-space: normal;
+    line-height: 1.25;
+}
+
+.bcc-quality-btn.bcc-active {
+    background: linear-gradient(135deg, #ff9fc4, #e97ba8) !important;
+    color: #fff8fb !important;
+    box-shadow: 0 6px 16px rgba(233, 123, 168, .26);
+}
+
+.bcc-quality-hint {
+    margin-top: 8px !important;
+}
+
+@media (max-width: 640px) {
+    .bcc-quality-buttons {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .bcc-quality-btn {
+        padding: 7px 5px;
+        font-size: 12px;
+    }
+}
