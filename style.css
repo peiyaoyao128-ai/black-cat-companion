@@ -905,3 +905,29 @@
         font-size: 12px;
     }
 }
+
+
+/* v8.1：真正高清动态模式
+   高清模式下以素材自身动态为准，不再叠加 CSS 呼吸/弹跳/旋转。
+   这样可以减少 animated WebP + CSS transform 双重重绘导致的卡顿。 */
+#bcc-desktop-root.bcc-quality-high .bcc-cat-image {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+    will-change: auto !important;
+}
+
+#bcc-desktop-root.bcc-quality-high .bcc-cat-button:hover .bcc-cat-image,
+#bcc-desktop-root.bcc-quality-high .bcc-cat-button:active .bcc-cat-image {
+    animation: none !important;
+    transform: none !important;
+}
+
+/* 平衡/省电入口先保留，不影响高清模式真动态播放。 */
+#bcc-desktop-root.bcc-quality-balanced .bcc-cat-image {
+    will-change: transform;
+}
+
+#bcc-desktop-root.bcc-quality-power .bcc-cat-image {
+    will-change: auto;
+}

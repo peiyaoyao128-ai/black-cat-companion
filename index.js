@@ -6,7 +6,7 @@ export { MODULE_NAME };
 const MODULE_NAME = 'black_cat_companion';
 const DEBUG_PREFIX = '<BlackCatCompanion> ';
 const UPDATE_INTERVAL = 2000;
-const EXTENSION_VERSION = '0.8.0';
+const EXTENSION_VERSION = '0.8.1';
 
 const windowHtmlPath = new URL('./window.html', import.meta.url).href;
 
@@ -57,6 +57,7 @@ let pawButton = null;
 let catImage = null;
 let catAssetCurrent = '';
 let catAssetSwapTimer = null;
+let lastAppliedQualityMode = '';
 let eyeLayer = null;
 let gazePupils = null;
 let catBadge = null;
@@ -264,46 +265,26 @@ function getQualityModeHint(mode = getSettings().qualityMode) {
     if (mode === 'power') {
         return '当前：省电模式。保留动态素材入口，后续可接入省电播放策略。';
     }
-    return '当前：高清模式。使用高清动态素材，并提前预加载常用动作。';
+    return '当前：高清模式。使用原始高清动态素材，不叠加额外 CSS 假动作，也不全量预加载。';
 }
 
 const preloadedCatAssets = new Set();
 
 function preloadCatAssets() {
-    const assetNames = [
-        'cat-sit.webp',
-        'cat-alert.webp',
-        'cat-sleep.webp',
-        'cat-happy.webp',
-        'cat-talk.webp',
-        'cat-play.webp',
-        'cat-loaf.webp',
-        'cat-sit-eyebase.webp',
-        'gaze-pupils.png',
-    ];
-
-    for (const name of assetNames) {
-        const url = assetPath(name);
-        if (preloadedCatAssets.has(url)) continue;
-        preloadedCatAssets.add(url);
-
-        const img = new Image();
-        img.decoding = 'async';
-        img.src = url;
-        if (img.decode) img.decode().catch(() => {});
-    }
+    // v8.1：高清模式不再一次性预加载全部 animated WebP。
+    // 新动作仍由 setCatImageSmooth() 在切换前进行单个素材预加载。
 }
 
 function applyQualityMode() {
     const settings = getSettings();
     const mode = settings.qualityMode || 'high';
 
-    desktopRoot?.classList.remove('bcc-quality-high', 'bcc-quality-balanced', 'bcc-quality-power');
-    desktopRoot?.classList.add(`bcc-quality-${mode}`);
+    if (!desktopRoot) return;
+    if (lastAppliedQualityMode === mode) return;
 
-    if (mode === 'high') {
-        preloadCatAssets();
-    }
+    desktopRoot.classList.remove('bcc-quality-high', 'bcc-quality-balanced', 'bcc-quality-power');
+    desktopRoot.classList.add(`bcc-quality-${mode}`);
+    lastAppliedQualityMode = mode;
 }
 
 
@@ -1021,11 +1002,15 @@ function setCatImageSmooth(displayAsset) {
         catButton?.classList.remove('bcc-switching', 'bcc-cat-fade');
     };
 
-    preload.src = displayAsset;
+    // 下一动作只做单素材预加载，不做全量批量预热。
+    // 用 rAF 延迟到当前点击/菜单刷新后，减少瞬时卡顿。
+    requestAnimationFrame(() => {
+        preload.src = displayAsset;
 
-    if (preload.decode) {
-        preload.decode().then(apply).catch(() => {});
-    }
+        if (preload.decode) {
+            preload.decode().then(apply).catch(() => {});
+        }
+    });
 }
 
 function updateDesktopPet() {
@@ -2348,7 +2333,7 @@ async function appendSettingsWindow() {
                                         <div id="black_cat_quality_balanced" class="menu_button bcc-quality-btn" data-bcc-quality="balanced">平衡模式</div>
                                         <div id="black_cat_quality_power" class="menu_button bcc-quality-btn" data-bcc-quality="power">省电模式</div>
                                     </div>
-                                    <small id="black_cat_quality_hint" class="bcc-lite-hint bcc-quality-hint">当前：高清模式。使用高清动态素材，并提前预加载常用动作。</small>
+                                    <small id="black_cat_quality_hint" class="bcc-lite-hint bcc-quality-hint">当前：高清模式。使用原始高清动态素材，不叠加额外 CSS 假动作，也不全量预加载。</small>
                                 </div>
 <small class="bcc-lite-hint">这里只是控制入口；扩展菜单隐藏是完全隐藏，互动菜单隐藏会留下猫爪。</small>
 
